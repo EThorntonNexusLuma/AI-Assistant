@@ -1,8 +1,285 @@
-<!doctype html>
-<html>
-  <head><meta charset="utf-8"><title>It works!</title></head>
-  <body style="font-family:system-ui;padding:24px">
-    <h1>GitHub Pages is live ✅</h1>
-    <p>Next we'll add the voice assistant.</p>
-  </body>
+<!DOCTYPE html>
+<html lang="en" data-embed="true">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Assistant — GitHub Pages (Self-Hosted SDK)</title>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; overflow-x: hidden; }
+    .floating-icon { position: fixed; bottom: 30px; right: 30px; width: 70px; height: 70px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #a855f7, #c084fc); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); z-index: 1000; animation: gentlePulse 3s ease-in-out infinite; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    .floating-icon:hover { transform: scale(1.1); box-shadow: 0 12px 40px rgba(139, 92, 246, 0.5); }
+    .floating-icon svg { width: 30px; height: 30px; color: white; }
+    @keyframes gentlePulse { 0%, 100% { transform: scale(1); box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3);} 50% { transform: scale(1.05); box-shadow: 0 12px 40px rgba(139, 92, 246, 0.5);} }
+    .holographic-interface { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 25%, #ddd6fe 50%, #c4b5fd 75%, #a78bfa 100%); backdrop-filter: blur(20px); z-index: 2000; display: flex; align-items: center; justify-content: center; opacity: 0; visibility: hidden; transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1); transform: scale(0.8) perspective(1000px) rotateX(10deg); }
+    .holographic-interface.active { opacity: 1; visibility: visible; transform: scale(1) perspective(1000px) rotateX(0deg); }
+    .interface-container { position: relative; max-width: 500px; width: 90%; padding: 60px 40px; text-align: center; animation: holographicFloat 4s ease-in-out infinite; }
+    @keyframes holographicFloat { 0%, 100% { transform: translateY(0px) rotateX(0deg);} 50% { transform: translateY(-10px) rotateX(2deg);} }
+    .voice-interface { position: relative; width: 200px; height: 200px; margin: 0 auto 40px; }
+    .voice-ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.3); backdrop-filter: blur(10px); }
+    .ring-outer { width: 200px; height: 200px; background: radial-gradient(circle, rgba(196, 181, 253, 0.3) 0%, rgba(139, 92, 246, 0.2) 40%, transparent 70%); box-shadow: 0 0 40px rgba(139, 92, 246, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.1); animation: ringPulse 3s ease-in-out infinite; }
+    .ring-middle { width: 140px; height: 140px; background: radial-gradient(circle, rgba(168, 139, 250, 0.5) 0%, rgba(139, 92, 246, 0.3) 50%, transparent 70%); box-shadow: 0 0 30px rgba(168, 139, 250, 0.5), inset 0 0 15px rgba(255, 255, 255, 0.2); animation: ringPulse 3s ease-in-out infinite 0.5s; }
+    .ring-inner { width: 80px; height: 80px; background: radial-gradient(circle, rgba(255, 255, 255, 0.9) 0%, rgba(196, 181, 253, 0.8) 50%, rgba(139, 92, 246, 0.6) 100%); box-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(139, 92, 246, 0.6), inset 0 0 10px rgba(255, 255, 255, 0.3); display: flex; align-items: center; justify-content: center; animation: ringPulse 3s ease-in-out infinite 1s; }
+    .mic-icon { width: 30px; height: 30px; color: #6b46c1; filter: drop-shadow(0 2px 4px rgba(255, 255, 255, 0.5)); }
+    .interface-text { margin-bottom: 40px; }
+    .interface-title { font-size: 28px; font-weight: 600; color: #4c1d95; margin-bottom: 12px; text-shadow: 0 2px 8px rgba(255, 255, 255, 0.5); letter-spacing: -0.025em; }
+    .interface-subtitle { font-size: 16px; color: #6b46c1; opacity: 0.8; line-height: 1.5; text-shadow: 0 1px 3px rgba(255, 255, 255, 0.3); }
+    .controls { display: flex; gap: 20px; justify-content: center; margin-bottom: 30px; }
+    .control-btn { padding: 12px 24px; border: none; border-radius: 25px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.3s ease; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+    .voice-btn { background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3); }
+    .voice-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4); }
+    .voice-btn.active { background: linear-gradient(135deg, #7c3aed, #8b5cf6); box-shadow: 0 4px 16px rgba(124, 58, 237, 0.5); }
+    .text-btn { background: rgba(255, 255, 255, 0.2); color: #6b46c1; border: 1px solid rgba(139, 92, 246, 0.3); }
+    .text-btn:hover { background: rgba(255, 255, 255, 0.3); transform: translateY(-2px); }
+    .text-btn.active { background: rgba(139, 92, 246, 0.2); color: #4c1d95; border: 1px solid rgba(139, 92, 246, 0.5); }
+    .chat-container { max-width: 400px; width: 100%; margin: 0 auto; display: none; }
+    .chat-container.active { display: block; }
+    .chat-messages { height: 300px; overflow-y: auto; padding: 20px; background: rgba(255, 255, 255, 0.1); border-radius: 20px; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); margin-bottom: 20px; }
+    .message { margin-bottom: 15px; padding: 12px 16px; border-radius: 18px; max-width: 80%; word-wrap: break-word; }
+    .user-message { background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; margin-left: auto; text-align: right; }
+    .ai-message { background: rgba(255, 255, 255, 0.8); color: #4c1d95; margin-right: auto; }
+    .chat-input-container { display: flex; gap: 10px; }
+    .chat-input { flex: 1; padding: 12px 16px; border: none; border-radius: 25px; background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); color: #4c1d95; font-size: 14px; }
+    .chat-input::placeholder { color: #8b5cf6; opacity: 0.7; }
+    .send-btn { padding: 12px 16px; border: none; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; cursor: pointer; width: 45px; height: 45px; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+    .send-btn:hover { transform: scale(1.1); }
+    .status { margin-top: 20px; padding: 8px 16px; border-radius: 15px; font-size: 12px; text-align: center; backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+    .listening { background: rgba(34, 197, 94, 0.2); color: #15803d; animation: statusPulse 2s ease-in-out infinite; }
+    .thinking { background: rgba(251, 191, 36, 0.2); color: #d97706; }
+    .inactive { background: rgba(156, 163, 175, 0.2); color: #6b7280; }
+    @keyframes statusPulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+    .close-btn { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); color: #6b46c1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+    .close-btn:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.1); }
+    .voice-visualizer { display: none; justify-content: center; align-items: center; gap: 3px; margin-top: 20px; }
+    .voice-visualizer.active { display: flex; }
+    .voice-bar { width: 4px; height: 20px; background: linear-gradient(to top, #8b5cf6, #c084fc); border-radius: 2px; animation: voiceWave 1s ease-in-out infinite; }
+    .voice-bar:nth-child(2) { animation-delay: 0.1s; }
+    .voice-bar:nth-child(3) { animation-delay: 0.2s; }
+    .voice-bar:nth-child(4) { animation-delay: 0.3s; }
+    .voice-bar:nth-child(5) { animation-delay: 0.4s; }
+    @media (max-width: 768px) {
+      .interface-container { padding: 40px 20px; }
+      .voice-interface { width: 160px; height: 160px; }
+      .ring-outer { width: 160px; height: 160px; }
+      .ring-middle { width: 110px; height: 110px; }
+      .ring-inner { width: 65px; height: 65px; }
+      .interface-title { font-size: 24px; }
+      .controls { flex-direction: column; align-items: center; }
+    }
+  </style>
+
+  <!-- GitHub Pages: use RELATIVE assets path (no leading slash) -->
+  <script>
+    (function(){
+      var PREFERRED_LOCAL_URL = 'assets/vapi.js';  // IMPORTANT on GitHub Pages
+
+      var candidates = [];
+      if (PREFERRED_LOCAL_URL) candidates.push(PREFERRED_LOCAL_URL);
+      candidates = candidates.concat(['./vapi.js','vapi.js','./assets/vapi.js','../assets/vapi.js']);
+
+      function tryLoad(urls, cb){
+        if(!urls.length) return cb(false, []);
+        var tried = [];
+        (function next(){
+          if(!urls.length) return cb(false, tried);
+          var url = urls.shift(); tried.push(url);
+          var s = document.createElement('script');
+          s.src = url; s.defer = true;
+          s.onload = function(){ console.log('[Vapi Loader] Loaded from', url); cb(true, tried); };
+          s.onerror = function(){ console.warn('[Vapi Loader] Failed', url); next(); };
+          document.head.appendChild(s);
+        })();
+      }
+
+      window.__ensureVapiLoaded = function(){
+        return new Promise(function(resolve){
+          tryLoad([].concat(candidates), function(ok, tried){
+            resolve({ ok, tried });
+          });
+        });
+      };
+    })();
+  </script>
+</head>
+
+<body
+  data-vapi-public-key="385ecf4c-99a4-4319-8b03-111c6c61abf9"
+  data-vapi-assistant-id="900acf00-1429-4a76-92b2-93f0e4ffa109"
+>
+  <div class="floating-icon" id="floatingIcon" aria-label="Open AI Assistant" role="button">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" 
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="23"/>
+      <line x1="8" y1="23" x2="16" y2="23"/>
+    </svg>
+  </div>
+
+  <div class="holographic-interface" id="holographicInterface">
+    <button class="close-btn" id="closeBtn" aria-label="Close assistant">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M6 6L18 18M6 18L18 6"/>
+      </svg>
+    </button>
+
+    <div class="interface-container">
+      <div class="voice-interface">
+        <div class="voice-ring ring-outer"></div>
+        <div class="voice-ring ring-middle"></div>
+        <div class="voice-ring ring-inner">
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="interface-text">
+        <h1 class="interface-title">Advanced voice-activated AI</h1>
+        <p class="interface-subtitle">Control your world hands-free with instant voice commands.</p>
+      </div>
+
+      <div class="controls">
+        <button class="control-btn voice-btn" id="voiceBtn">Voice Chat</button>
+        <button class="control-btn text-btn" id="textBtn">Text Chat</button>
+      </div>
+
+      <div class="voice-visualizer" id="voiceVisualizer" aria-hidden="true">
+        <div class="voice-bar"></div><div class="voice-bar"></div><div class="voice-bar"></div><div class="voice-bar"></div><div class="voice-bar"></div>
+      </div>
+
+      <div class="chat-container" id="chatContainer" aria-live="polite">
+        <div class="chat-messages" id="chatMessages">
+          <div class="message ai-message">Hello! I'm your AI assistant. How can I help you today?</div>
+        </div>
+        <div class="chat-input-container">
+          <input type="text" class="chat-input" id="chatInput" placeholder="Type your message..." />
+          <button class="send-btn" id="sendBtn" aria-label="Send message">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M2 3l20 9L2 21v-6l13-2L2 9V3z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="status inactive" id="status">Ready to assist</div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
+      const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
+
+      let vapi = null;
+      let isListening = false;
+
+      const floatingIcon = document.getElementById('floatingIcon');
+      const holo = document.getElementById('holographicInterface');
+      const closeBtn = document.getElementById('closeBtn');
+      const voiceBtn = document.getElementById('voiceBtn');
+      const textBtn = document.getElementById('textBtn');
+      const chatContainer = document.getElementById('chatContainer');
+      const chatMessages = document.getElementById('chatMessages');
+      const chatInput = document.getElementById('chatInput');
+      const sendBtn = document.getElementById('sendBtn');
+      const statusEl = document.getElementById('status');
+      const voiceViz = document.getElementById('voiceVisualizer');
+
+      function setStatus(text, cls) {
+        statusEl.textContent = text;
+        statusEl.className = `status ${cls}`;
+      }
+      function addMsg(sender, text) {
+        const el = document.createElement('div');
+        el.className = `message ${sender}-message`;
+        el.textContent = text;
+        chatMessages.appendChild(el);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+
+      async function getMicPermission() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(t => t.stop());
+          return true;
+        } catch (err) {
+          console.error('Mic permission denied or unavailable', err);
+          setStatus('❌ Microphone permission denied', 'inactive');
+          return false;
+        }
+      }
+
+      async function ensureSDK() {
+        if (window.Vapi && typeof window.Vapi === 'function') return true;
+        const res = await window.__ensureVapiLoaded();
+        if (!(window.Vapi && typeof window.Vapi === 'function')) {
+          console.error('Vapi SDK not found. Tried:', res && res.tried);
+          setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
+          return false;
+        }
+        return true;
+      }
+
+      async function startVoice() {
+        if (!(await getMicPermission())) return;
+        if (!(await ensureSDK())) return;
+        if (!PUBLIC_KEY || !ASSISTANT_ID) {
+          console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
+          setStatus('❌ Missing Vapi keys', 'inactive');
+          return;
+        }
+        try {
+          if (!vapi) {
+            vapi = new window.Vapi(PUBLIC_KEY);
+            vapi.on('call-start', () => { isListening = true; setStatus('🔴 Connected - Speak now!', 'listening'); voiceViz.classList.add('active'); });
+            vapi.on('call-end', () => { isListening = false; setStatus('✅ Ready to assist', 'inactive'); voiceViz.classList.remove('active'); });
+            vapi.on('speech-start', () => voiceViz.classList.add('active'));
+            vapi.on('speech-end', () => voiceViz.classList.remove('active'));
+            vapi.on('message', (p) => {
+              if (p?.type === 'transcript' && p.transcriptType === 'final') addMsg('user', p.transcript);
+              if (p?.type === 'assistant-response' && p.message) addMsg('ai', p.message);
+            });
+            vapi.on('error', (e) => { console.error('[Vapi Error]', e); setStatus('❌ Voice error', 'inactive'); });
+          }
+          setStatus('🎤 Starting voice…', 'thinking');
+          await vapi.start(ASSISTANT_ID);
+        } catch (err) {
+          console.error('Start failed', err);
+          setStatus('❌ Start failed', 'inactive');
+        }
+      }
+
+      function stopVoice() {
+        try { vapi && vapi.stop && vapi.stop(); } catch {}
+        isListening = false;
+        voiceViz.classList.remove('active');
+        setStatus('Text mode active', 'inactive');
+      }
+
+      floatingIcon.addEventListener('click', () => { holo.classList.add('active'); setStatus('Choose Voice or Text', 'inactive'); });
+      closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
+      voiceBtn.addEventListener('click', () => { voiceBtn.classList.add('active'); textBtn.classList.remove('active'); chatContainer.classList.remove('active'); startVoice(); });
+      textBtn.addEventListener('click', () => { textBtn.classList.add('active'); voiceBtn.classList.remove('active'); chatContainer.classList.add('active'); stopVoice(); chatInput.focus(); });
+      sendBtn.addEventListener('click', () => {
+        const msg = chatInput.value.trim();
+        if (!msg) return;
+        addMsg('user', msg);
+        chatInput.value = '';
+        if (isListening && vapi) {
+          try { vapi.send({ type: 'add-message', message: { role: 'user', content: msg } }); setStatus('AI thinking…', 'thinking'); } catch {}
+        } else {
+          setStatus('AI thinking…', 'thinking');
+          setTimeout(() => { addMsg('ai', "I'm here and listening. What would you like to do next?"); setStatus('Text mode active', 'inactive'); }, 700);
+        }
+      });
+
+      console.log('[Assistant] GitHub Pages build: using relative assets path');
+    })();
+  </script>
+</body>
 </html>
