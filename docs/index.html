@@ -150,22 +150,21 @@
     const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
     const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
     
-    // Multiple SDK loading approaches - HTML script tag vs. NPM package
+    // SDK loading approaches - prioritizing working CDN methods
     const SDK_PATHS = [
-      // Method 1: Official HTML script tag approach (most reliable)
+      // Method 1: Official HTML script tag approach (most reliable for your setup)
       'https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js',
       
-      // Method 2: NPM package build (might not be browser-ready)
-      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.umd.js',
-      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.js',
-      'https://unpkg.com/@vapi-ai/web@latest/dist/index.umd.js',
+      // Method 2: Try different CDN endpoints for NPM package
       'https://unpkg.com/@vapi-ai/web@latest/dist/index.js',
+      'https://unpkg.com/@vapi-ai/web@latest/dist/vapi.js',
+      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.js',
+      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.js',
       
-      // Method 3: Local browser builds (if you have them)
-      './assets/vapi.browser.js',
-      './docs/assets/vapi.browser.js', 
-      'assets/vapi.browser.js',
-      'docs/assets/vapi.browser.js'
+      // Method 3: Local files (Note: your current vapi.js is CommonJS format and won't work)
+      // We'll skip these since your file is Node.js format, not browser format
+      // 'assets/vapi.js',  // Your file is CommonJS, not browser-ready
+      // 'assets/vapi.browser.js', // Uncomment if you get browser build
     ];
 
     // ---- STATE ----
@@ -281,16 +280,17 @@
       for (const path of SDK_PATHS) {
         try {
           console.log(`[SDK] Attempting to load from: ${path}`);
+          setStatus(`🔄 Trying: ${path.split('/').pop()}...`, 'thinking');
           
           await new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = path;
             script.onload = () => {
-              console.log(`[SDK] Successfully loaded from: ${path}`);
+              console.log(`[SDK] Successfully loaded script from: ${path}`);
               resolve();
             };
-            script.onerror = () => {
-              console.warn(`[SDK] Failed to load from: ${path}`);
+            script.onerror = (error) => {
+              console.warn(`[SDK] Failed to load from: ${path}`, error);
               reject(new Error(`Failed to load from ${path}`));
             };
             
@@ -299,13 +299,17 @@
               if (!script.onload.called) {
                 reject(new Error(`Timeout loading from ${path}`));
               }
-            }, 5000);
+            }, 10000); // Increased timeout to 10 seconds
             
             document.head.appendChild(script);
           });
 
+          // Give a moment for globals to be set
+          await new Promise(resolve => setTimeout(resolve, 100));
+
           // Verify SDK is actually available - check multiple possible global names
           if (window.Vapi && typeof window.Vapi === 'function') {
+            console.log('[SDK] Found window.Vapi constructor');
             sdkLoaded = true;
             sdkLoading = false;
             setStatus('✅ SDK loaded successfully (Vapi)', 'inactive');
@@ -314,6 +318,7 @@
           
           // HTML script tag approach
           if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
+            console.log('[SDK] Found window.vapiSDK.run function');
             // Create wrapper to normalize interface
             window.Vapi = function(publicKey) {
               let vapiInstance = null;
@@ -323,6 +328,7 @@
                 start: async function(assistantId) {
                   return new Promise((resolve, reject) => {
                     try {
+                      console.log('[SDK] Starting vapiSDK with:', { publicKey: publicKey.substring(0, 10) + '...', assistantId });
                       vapiInstance = window.vapiSDK.run({
                         apiKey: publicKey,
                         assistant: assistantId,
@@ -342,11 +348,13 @@
                         resolve({});
                       }, 500);
                     } catch (error) {
+                      console.error('[SDK] Error starting vapiSDK:', error);
                       reject(error);
                     }
                   });
                 },
                 stop: function() {
+                  console.log('[SDK] Stopping vapiSDK');
                   if (vapiInstance && vapiInstance.stop) {
                     vapiInstance.stop();
                   }
@@ -369,7 +377,12 @@
             setStatus('✅ SDK loaded successfully (vapiSDK)', 'inactive');
             return true;
           }
+
+          console.warn(`[SDK] Script loaded from ${path} but no recognized globals found`);
+          console.log('[SDK] Available globals:', Object.keys(window).filter(key => key.toLowerCase().includes('vapi')));
+          
         } catch (error) {
+          console.warn(`[SDK] Error loading from ${path}:`, error.message);
           // Continue to next path
           continue;
         }
@@ -377,11 +390,15 @@
 
       // If we get here, all paths failed
       sdkLoading = false;
-      const errorMsg = '❌ Cannot load Vapi SDK. Tried HTML script tag and NPM package approaches.';
+      const errorMsg = '❌ Cannot load Vapi SDK from CDN. Check internet connection.';
       setStatus(errorMsg, 'error');
       console.error('[SDK] Load failed. Tried paths:', SDK_PATHS);
-      console.error('[SDK] Make sure you have internet connection for CDN access');
-      console.log('[SDK] If using local files, ensure you have the correct browser build (not Node.js/CommonJS version)');
+      console.error('[SDK] Common causes:');
+      console.error('  1. No internet connection or CDN blocked');
+      console.error('  2. Your local vapi.js file is Node.js format (has "exports", "require") - not browser compatible');
+      console.error('  3. Need to use CDN or get browser build of Vapi SDK');
+      console.log('[SDK] Your local file at docs/assets/vapi.js is CommonJS format and cannot be used in browsers');
+      console.log('[SDK] The app will try CDN loading which should work if you have internet access');
       return false;
     }
 
@@ -668,12 +685,28 @@
     });
 
     // ---- INITIALIZATION ----
-    console.log('[Assistant] Initialized - GitHub Pages build with multiple SDK loading strategies');
-    console.log('[Assistant] Will attempt to load SDK from:', SDK_PATHS.slice(0, 3), '...');
+    console.log('[Assistant] Initialized - GitHub Pages build with CDN SDK loading');
+    console.log('[Assistant] Note: Your local docs/assets/vapi.js is CommonJS format and cannot be used in browsers');
+    console.log('[Assistant] Will load browser-compatible SDK from CDN:', SDK_PATHS.slice(0, 2));
+    console.log('[Assistant] If you see "Cannot load Vapi SDK" - check your internet connection');
     
-    // Try to preload SDK on page load
+    // Immediate SDK loading attempt for better user feedback
+    loadSDK().then(success => {
+      if (success) {
+        console.log('[Assistant] ✅ SDK loaded successfully on page load');
+      } else {
+        console.warn('[Assistant] ❌ Failed to load SDK on page load - will retry when user clicks voice');
+      }
+    }).catch(e => {
+      console.warn('[SDK] Initial load failed:', e.message);
+    });
+    
+    // Backup: Try to preload SDK on DOM ready
     document.addEventListener('DOMContentLoaded', () => {
-      loadSDK().catch(e => console.warn('[SDK] Preload failed:', e));
+      if (!sdkLoaded) {
+        console.log('[Assistant] Retrying SDK load on DOM ready...');
+        loadSDK().catch(e => console.warn('[SDK] DOM ready load failed:', e));
+      }
     });
 
   })();
