@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<script src="assets/vapi.js"></script>
 <html lang="en" data-embed="true">
 <head>
   <meta charset="UTF-8" />
@@ -7,6 +6,7 @@
   <title>AI Assistant — GitHub Pages (Self-Hosted SDK)</title>
 
   <style>
+    /* ——— your design remains intact ——— */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; overflow-x: hidden; }
     .floating-icon { position: fixed; bottom: 30px; right: 30px; width: 70px; height: 70px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #a855f7, #c084fc); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); z-index: 1000; animation: gentlePulse 3s ease-in-out infinite; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
@@ -59,6 +59,7 @@
     .voice-bar:nth-child(3) { animation-delay: 0.2s; }
     .voice-bar:nth-child(4) { animation-delay: 0.3s; }
     .voice-bar:nth-child(5) { animation-delay: 0.4s; }
+    @keyframes voiceWave { 0%, 100% { height: 20px; } 50% { height: 40px; } }
     @media (max-width: 768px) {
       .interface-container { padding: 40px 20px; }
       .voice-interface { width: 160px; height: 160px; }
@@ -70,38 +71,15 @@
     }
   </style>
 
-  <!-- GitHub Pages: use RELATIVE assets path (no leading slash) -->
-  
-
-      function tryLoad(urls, cb){
-        if(!urls.length) return cb(false, []);
-        var tried = [];
-        (function next(){
-          if(!urls.length) return cb(false, tried);
-          var url = urls.shift(); tried.push(url);
-          var s = document.createElement('script');
-          s.src = url; s.defer = true;
-          s.onload = function(){ console.log('[Vapi Loader] Loaded from', url); cb(true, tried); };
-          s.onerror = function(){ console.warn('[Vapi Loader] Failed', url); next(); };
-          document.head.appendChild(s);
-        })();
-      }
-
-      window.__ensureVapiLoaded = function(){
-        return new Promise(function(resolve){
-          tryLoad([].concat(candidates), function(ok, tried){
-            resolve({ ok, tried });
-          });
-        });
-      };
-    })();
-  </script>
+  <!-- IMPORTANT: load the SDK ONCE from docs/assets/vapi.js -->
+  <script src="assets/vapi.js"></script>
 </head>
 
 <body
   data-vapi-public-key="385ecf4c-99a4-4319-8b03-111c6c61abf9"
   data-vapi-assistant-id="900acf00-1429-4a76-92b2-93f0e4ffa109"
 >
+  <!-- Floating Icon (professional mic icon) -->
   <div class="floating-icon" id="floatingIcon" aria-label="Open AI Assistant" role="button">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" 
          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -112,6 +90,7 @@
     </svg>
   </div>
 
+  <!-- Assistant UI -->
   <div class="holographic-interface" id="holographicInterface">
     <button class="close-btn" id="closeBtn" aria-label="Close assistant">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -209,20 +188,19 @@
         }
       }
 
-      async function ensureSDK() {
-        if (window.Vapi && typeof window.Vapi === 'function') return true;
-     
-        if (!(window.Vapi && typeof window.Vapi === 'function')) {
-          console.error('Vapi SDK not found. Tried:', res && res.tried);
-          setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
-          return false;
-        }
-        return true;
+      // With vapi.js included via <script src="assets/vapi.js">,
+      // window.Vapi should already exist here.
+      function sdkReady() {
+        return (window.Vapi && typeof window.Vapi === 'function');
       }
 
       async function startVoice() {
         if (!(await getMicPermission())) return;
-        if (!(await ensureSDK())) return;
+        if (!sdkReady()) {
+          console.error('Vapi SDK not found. Ensure <script src="assets/vapi.js"> is present and docs/assets/vapi.js exists.');
+          setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
+          return;
+        }
         if (!PUBLIC_KEY || !ASSISTANT_ID) {
           console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
           setStatus('❌ Missing Vapi keys', 'inactive');
@@ -256,6 +234,7 @@
         setStatus('Text mode active', 'inactive');
       }
 
+      // UI wiring
       floatingIcon.addEventListener('click', () => { holo.classList.add('active'); setStatus('Choose Voice or Text', 'inactive'); });
       closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
       voiceBtn.addEventListener('click', () => { voiceBtn.classList.add('active'); textBtn.classList.remove('active'); chatContainer.classList.remove('active'); startVoice(); });
@@ -273,7 +252,7 @@
         }
       });
 
-      console.log('[Assistant] GitHub Pages build: using relative assets path');
+      console.log('[Assistant] GitHub Pages build: loading SDK from assets/vapi.js');
     })();
   </script>
 </body>
