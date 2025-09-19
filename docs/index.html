@@ -145,115 +145,187 @@
   </div>
 
   <script>
-    (function () {
-      const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
-      const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
+  (function () {
+    const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
+    const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
 
-      let vapi = null;
-      let isListening = false;
+    // ---- STATE ----
+    let vapi = null;
+    let isListening = false;
+    let micStream = null;       // keep mic stream alive until Vapi is running
+    let audioCtx = null;        // for autoplay policies (Safari/Chrome)
 
-      const floatingIcon = document.getElementById('floatingIcon');
-      const holo = document.getElementById('holographicInterface');
-      const closeBtn = document.getElementById('closeBtn');
-      const voiceBtn = document.getElementById('voiceBtn');
-      const textBtn = document.getElementById('textBtn');
-      const chatContainer = document.getElementById('chatContainer');
-      const chatMessages = document.getElementById('chatMessages');
-      const chatInput = document.getElementById('chatInput');
-      const sendBtn = document.getElementById('sendBtn');
-      const statusEl = document.getElementById('status');
-      const voiceViz = document.getElementById('voiceVisualizer');
+    // ---- UI HOOKS ----
+    const floatingIcon = document.getElementById('floatingIcon');
+    const holo = document.getElementById('holographicInterface');
+    const closeBtn = document.getElementById('closeBtn');
+    const voiceBtn = document.getElementById('voiceBtn');
+    const textBtn = document.getElementById('textBtn');
+    const chatContainer = document.getElementById('chatContainer');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const statusEl = document.getElementById('status');
+    const voiceViz = document.getElementById('voiceVisualizer');
 
-      function setStatus(text, cls) {
-        statusEl.textContent = text;
-        statusEl.className = `status ${cls}`;
-      }
-      function addMsg(sender, text) {
-        const el = document.createElement('div');
-        el.className = `message ${sender}-message`;
-        el.textContent = text;
-        chatMessages.appendChild(el);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      }
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = `status ${cls}`;
+      console.log('[Assistant Status]', text);
+    }
+    function addMsg(sender, text) {
+      const el = document.createElement('div');
+      el.className = `message ${sender}-message`;
+      el.textContent = text;
+      chatMessages.appendChild(el);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    function sdkReady() {
+      return (window.Vapi && typeof window.Vapi === 'function');
+    }
 
-      async function getMicPermission() {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          stream.getTracks().forEach(t => t.stop());
-          return true;
-        } catch (err) {
-          console.error('Mic permission denied or unavailable', err);
-          setStatus('❌ Microphone permission denied', 'inactive');
-          return false;
+    // ---- AUDIO + MIC HELPERS ----
+    async function ensureAudioContext() {
+      try {
+        if (!audioCtx) {
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) audioCtx = new AC();
         }
+        if (audioCtx && audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+      } catch (e) {
+        console.warn('AudioContext resume failed (will try to continue):', e);
+      }
+    }
+
+    async function ensureMic() {
+      // Get/keep a mic stream alive so the browser prompts the user and a track is available.
+      // DO NOT stop the tracks immediately; some browsers close the session if no track is active.
+      if (micStream && micStream.active) return true;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        return true;
+      } catch (err) {
+        console.error('Mic permission denied or unavailable', err);
+        setStatus('❌ Microphone permission denied', 'inactive');
+        return false;
+      }
+    }
+
+    function releaseMic(reason = '') {
+      if (micStream) {
+        try { micStream.getTracks().forEach(t => t.stop()); } catch {}
+        micStream = null;
+        if (reason) console.log('[Mic] released:', reason);
+      }
+    }
+
+    // ---- START / STOP VOICE ----
+    async function startVoice() {
+      // 1) Make sure browser will allow audio playback after this click
+      await ensureAudioContext();
+
+      // 2) Make sure mic permission is granted and track is alive
+      if (!(await ensureMic())) return;
+
+      // 3) SDK must already be loaded by <script src="assets/vapi.js">
+      if (!sdkReady()) {
+        console.error('Vapi SDK not found. Ensure <script src="assets/vapi.js"> is present and docs/assets/vapi.js exists.');
+        setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
+        return;
       }
 
-      // With vapi.js included via <script src="assets/vapi.js">,
-      // window.Vapi should already exist here.
-      function sdkReady() {
-        return (window.Vapi && typeof window.Vapi === 'function');
+      // 4) Validate keys
+      if (!PUBLIC_KEY || !ASSISTANT_ID) {
+        console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
+        setStatus('❌ Missing Vapi keys', 'inactive');
+        return;
       }
 
-      async function startVoice() {
-        if (!(await getMicPermission())) return;
-        if (!sdkReady()) {
-          console.error('Vapi SDK not found. Ensure <script src="assets/vapi.js"> is present and docs/assets/vapi.js exists.');
-          setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
-          return;
+      try {
+        if (!vapi) {
+          vapi = new window.Vapi(PUBLIC_KEY);
+
+          // Verbose event logging so we can see what happens
+          vapi.on('call-start', (p) => {
+            console.log('[Vapi] call-start', p);
+            isListening = true;
+            setStatus('🔴 Connected - Speak now!', 'listening');
+            voiceViz.classList.add('active');
+            // We can now safely release the pre-permission mic stream if we want.
+            // Comment out the next line if your browser needs the original stream to stay open.
+            // releaseMic('Vapi call-start');
+          });
+
+          vapi.on('call-end', (p) => {
+            console.warn('[Vapi] call-end', p);
+            isListening = false;
+            setStatus('✅ Ready to assist', 'inactive');
+            voiceViz.classList.remove('active');
+            // Ensure mic is released if the call ends
+            releaseMic('call-end');
+          });
+
+          // Some builds provide extra WebRTC / status events; log them if present
+          vapi.on?.('webrtc-state', (s) => console.log('[Vapi] webrtc-state', s));
+          vapi.on?.('status', (s) => console.log('[Vapi] status', s));
+          vapi.on('speech-start', () => voiceViz.classList.add('active'));
+          vapi.on('speech-end', () => voiceViz.classList.remove('active'));
+
+          vapi.on('message', (p) => {
+            if (p?.type === 'transcript' && p.transcriptType === 'final') addMsg('user', p.transcript);
+            if (p?.type === 'assistant-response' && p.message) addMsg('ai', p.message);
+          });
+
+          vapi.on('error', (e) => {
+            console.error('[Vapi Error]', e);
+            setStatus('❌ Voice error — see console', 'inactive');
+            // Keep mic around a moment so you can retry without reprompt
+            setTimeout(() => releaseMic('error'), 1000);
+          });
         }
-        if (!PUBLIC_KEY || !ASSISTANT_ID) {
-          console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
-          setStatus('❌ Missing Vapi keys', 'inactive');
-          return;
-        }
-        try {
-          if (!vapi) {
-            vapi = new window.Vapi(PUBLIC_KEY);
-            vapi.on('call-start', () => { isListening = true; setStatus('🔴 Connected - Speak now!', 'listening'); voiceViz.classList.add('active'); });
-            vapi.on('call-end', () => { isListening = false; setStatus('✅ Ready to assist', 'inactive'); voiceViz.classList.remove('active'); });
-            vapi.on('speech-start', () => voiceViz.classList.add('active'));
-            vapi.on('speech-end', () => voiceViz.classList.remove('active'));
-            vapi.on('message', (p) => {
-              if (p?.type === 'transcript' && p.transcriptType === 'final') addMsg('user', p.transcript);
-              if (p?.type === 'assistant-response' && p.message) addMsg('ai', p.message);
-            });
-            vapi.on('error', (e) => { console.error('[Vapi Error]', e); setStatus('❌ Voice error', 'inactive'); });
-          }
-          setStatus('🎤 Starting voice…', 'thinking');
-          await vapi.start(ASSISTANT_ID);
-        } catch (err) {
-          console.error('Start failed', err);
-          setStatus('❌ Start failed', 'inactive');
-        }
+
+        setStatus('🎤 Starting voice…', 'thinking');
+
+        // 5) Start the call. If your SDK accepts options, pass them here (example shown):
+        // await vapi.start(ASSISTANT_ID, { enableMic: true });
+        await vapi.start(ASSISTANT_ID);
+
+      } catch (err) {
+        console.error('Start failed', err);
+        setStatus('❌ Start failed — see console', 'inactive');
+        // release after failure
+        releaseMic('start-failed');
       }
+    }
 
-      function stopVoice() {
-        try { vapi && vapi.stop && vapi.stop(); } catch {}
-        isListening = false;
-        voiceViz.classList.remove('active');
-        setStatus('Text mode active', 'inactive');
+    function stopVoice() {
+      try { vapi && vapi.stop && vapi.stop(); } catch (e) { console.warn('stop error', e); }
+      isListening = false;
+      voiceViz.classList.remove('active');
+      setStatus('Text mode active', 'inactive');
+      releaseMic('manual stop');
+    }
+
+    // ---- UI WIRING ----
+    floatingIcon.addEventListener('click', () => { holo.classList.add('active'); setStatus('Choose Voice or Text', 'inactive'); });
+    closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
+    voiceBtn.addEventListener('click', () => { voiceBtn.classList.add('active'); textBtn.classList.remove('active'); chatContainer.classList.remove('active'); startVoice(); });
+    textBtn.addEventListener('click', () => { textBtn.classList.add('active'); voiceBtn.classList.remove('active'); chatContainer.classList.add('active'); stopVoice(); chatInput.focus(); });
+    sendBtn.addEventListener('click', () => {
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      addMsg('user', msg);
+      chatInput.value = '';
+      if (isListening && vapi) {
+        try { vapi.send({ type: 'add-message', message: { role: 'user', content: msg } }); setStatus('AI thinking…', 'thinking'); } catch {}
+      } else {
+        setStatus('AI thinking…', 'thinking');
+        setTimeout(() => { addMsg('ai', "I'm here and listening. What would you like to do next?"); setStatus('Text mode active', 'inactive'); }, 700);
       }
+    });
 
-      // UI wiring
-      floatingIcon.addEventListener('click', () => { holo.classList.add('active'); setStatus('Choose Voice or Text', 'inactive'); });
-      closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
-      voiceBtn.addEventListener('click', () => { voiceBtn.classList.add('active'); textBtn.classList.remove('active'); chatContainer.classList.remove('active'); startVoice(); });
-      textBtn.addEventListener('click', () => { textBtn.classList.add('active'); voiceBtn.classList.remove('active'); chatContainer.classList.add('active'); stopVoice(); chatInput.focus(); });
-      sendBtn.addEventListener('click', () => {
-        const msg = chatInput.value.trim();
-        if (!msg) return;
-        addMsg('user', msg);
-        chatInput.value = '';
-        if (isListening && vapi) {
-          try { vapi.send({ type: 'add-message', message: { role: 'user', content: msg } }); setStatus('AI thinking…', 'thinking'); } catch {}
-        } else {
-          setStatus('AI thinking…', 'thinking');
-          setTimeout(() => { addMsg('ai', "I'm here and listening. What would you like to do next?"); setStatus('Text mode active', 'inactive'); }, 700);
-        }
-      });
-
-      console.log('[Assistant] GitHub Pages build: loading SDK from assets/vapi.js');
-    })();
-  </script>
-</body>
-</html>
+    console.log('[Assistant] GitHub Pages build: SDK loaded via <script src="assets/vapi.js">');
+  })();
+</script>
