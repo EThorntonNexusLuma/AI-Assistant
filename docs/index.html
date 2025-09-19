@@ -240,6 +240,97 @@
 
     // Add debug button functionality (can be called from console)
     window.debugVapi = debugAudioSetup;
+    window.debugvapi = debugAudioSetup; // lowercase version for convenience
+    
+    // Add comprehensive audio debugging
+    window.fullAudioTest = async function() {
+      console.log('\n🔧 === COMPREHENSIVE AUDIO TEST ===');
+      
+      // 1. Test basic speaker functionality
+      console.log('🔊 Step 1: Testing basic audio output...');
+      try {
+        await ensureAudioContext();
+        console.log('✅ AudioContext created successfully');
+        
+        // Test beep
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 440;
+        gainNode.gain.value = 0.1;
+        
+        oscillator.start();
+        setTimeout(() => oscillator.stop(), 500);
+        
+        console.log('🔊 Did you hear a beep? (This tests if your speakers work)');
+      } catch (e) {
+        console.error('❌ Basic audio test failed:', e);
+      }
+      
+      // 2. Check for Vapi audio elements
+      setTimeout(() => {
+        console.log('\n🔊 Step 2: Checking for Vapi audio elements...');
+        const audioElements = document.querySelectorAll('audio');
+        console.log(`Found ${audioElements.length} audio element(s)`);
+        
+        audioElements.forEach((audio, i) => {
+          console.log(`Audio Element ${i}:`, {
+            id: audio.id || 'no-id',
+            src: audio.src || 'no-src',
+            currentSrc: audio.currentSrc || 'no-currentSrc',
+            autoplay: audio.autoplay,
+            muted: audio.muted,
+            paused: audio.paused,
+            volume: audio.volume,
+            readyState: audio.readyState,
+            networkState: audio.networkState,
+            duration: audio.duration || 'unknown'
+          });
+          
+          // Try to force play each audio element
+          if (audio.paused) {
+            console.log(`Attempting to play audio element ${i}...`);
+            audio.play().then(() => {
+              console.log(`✅ Audio element ${i} playing`);
+            }).catch(err => {
+              console.log(`❌ Audio element ${i} play failed:`, err.message);
+            });
+          }
+        });
+        
+        // 3. Check WebRTC connection details
+        console.log('\n🔊 Step 3: WebRTC Debug Info...');
+        if (window.vapiSDK) {
+          console.log('✅ vapiSDK found');
+        } else {
+          console.log('❌ vapiSDK not found');
+        }
+        
+        if (vapi) {
+          console.log('✅ Vapi instance exists');
+        } else {
+          console.log('❌ No Vapi instance');
+        }
+        
+        console.log('Current call state:', {
+          isListening: isListening,
+          sdkLoaded: sdkLoaded,
+          audioCtxState: audioCtx?.state
+        });
+        
+        console.log('\n💡 TROUBLESHOOTING STEPS:');
+        console.log('1. If you heard the beep: Speakers work, issue is with Vapi audio routing');
+        console.log('2. If no beep: Check volume/mute, try headphones, check audio device');
+        console.log('3. If audio elements show but no sound: Try different browser (Chrome recommended)');
+        console.log('4. Check browser autoplay settings: chrome://settings/content/sound');
+        
+        console.log('\n🔧 === END COMPREHENSIVE TEST ===\n');
+      }, 1000);
+    };
     
     // Add audio test function (can be called from console)
     window.testAudio = async function() {
@@ -269,6 +360,18 @@
         setStatus('❌ Audio test failed', 'error');
       }
     };
+    
+    // Add lowercase version and shortcut
+    window.testaudio = window.testAudio; // lowercase version for convenience
+    window.test = window.testAudio; // even shorter version
+    window.fulltest = window.fullAudioTest; // comprehensive test
+    
+    // Show available console commands
+    console.log('\n🎛️ === AVAILABLE CONSOLE COMMANDS ===');
+    console.log('test() - Quick speaker test (plays beep)');
+    console.log('fulltest() - Comprehensive audio diagnosis');
+    console.log('debugvapi() - Show current audio debug info');
+    console.log('🎛️ === END COMMANDS ===\n');
 
     // ---- DYNAMIC SDK LOADING ----
     async function loadSDK() {
