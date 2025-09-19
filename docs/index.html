@@ -31,6 +31,7 @@
     .voice-btn { background: linear-gradient(135deg, #8b5cf6, #a855f7); color: white; box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3); }
     .voice-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4); }
     .voice-btn.active { background: linear-gradient(135deg, #7c3aed, #8b5cf6); box-shadow: 0 4px 16px rgba(124, 58, 237, 0.5); }
+    .voice-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
     .text-btn { background: rgba(255, 255, 255, 0.2); color: #6b46c1; border: 1px solid rgba(139, 92, 246, 0.3); }
     .text-btn:hover { background: rgba(255, 255, 255, 0.3); transform: translateY(-2px); }
     .text-btn.active { background: rgba(139, 92, 246, 0.2); color: #4c1d95; border: 1px solid rgba(139, 92, 246, 0.5); }
@@ -49,7 +50,9 @@
     .listening { background: rgba(34, 197, 94, 0.2); color: #15803d; animation: statusPulse 2s ease-in-out infinite; }
     .thinking { background: rgba(251, 191, 36, 0.2); color: #d97706; }
     .inactive { background: rgba(156, 163, 175, 0.2); color: #6b7280; }
+    .error { background: rgba(239, 68, 68, 0.2); color: #dc2626; }
     @keyframes statusPulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
+    @keyframes ringPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.05); } }
     .close-btn { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); color: #6b46c1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
     .close-btn:hover { background: rgba(255, 255, 255, 0.3); transform: scale(1.1); }
     .voice-visualizer { display: none; justify-content: center; align-items: center; gap: 3px; margin-top: 20px; }
@@ -70,9 +73,6 @@
       .controls { flex-direction: column; align-items: center; }
     }
   </style>
-
-  <!-- IMPORTANT: load the SDK ONCE from docs/assets/vapi.js -->
-  <script src="assets/vapi.js"></script>
 </head>
 
 <body
@@ -93,7 +93,7 @@
   <!-- Assistant UI -->
   <div class="holographic-interface" id="holographicInterface">
     <button class="close-btn" id="closeBtn" aria-label="Close assistant">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 6L18 18M6 18L18 6"/>
       </svg>
     </button>
@@ -146,14 +146,27 @@
 
   <script>
   (function () {
+    // ---- CONFIGURATION ----
     const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
     const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
+    
+    // Multiple possible SDK paths - GitHub Pages can vary
+    const SDK_PATHS = [
+      './assets/vapi.js',
+      './docs/assets/vapi.js', 
+      '/assets/vapi.js',
+      '/docs/assets/vapi.js',
+      'assets/vapi.js',
+      'docs/assets/vapi.js'
+    ];
 
     // ---- STATE ----
     let vapi = null;
     let isListening = false;
-    let micStream = null;       // keep mic stream alive until Vapi is running
-    let audioCtx = null;        // for autoplay policies (Safari/Chrome)
+    let micStream = null;
+    let audioCtx = null;
+    let sdkLoaded = false;
+    let sdkLoading = false;
 
     // ---- UI HOOKS ----
     const floatingIcon = document.getElementById('floatingIcon');
@@ -168,11 +181,13 @@
     const statusEl = document.getElementById('status');
     const voiceViz = document.getElementById('voiceVisualizer');
 
+    // ---- UTILITY FUNCTIONS ----
     function setStatus(text, cls) {
       statusEl.textContent = text;
       statusEl.className = `status ${cls}`;
       console.log('[Assistant Status]', text);
     }
+
     function addMsg(sender, text) {
       const el = document.createElement('div');
       el.className = `message ${sender}-message`;
@@ -180,8 +195,72 @@
       chatMessages.appendChild(el);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-    function sdkReady() {
-      return (window.Vapi && typeof window.Vapi === 'function');
+
+    function isSDKReady() {
+      return sdkLoaded && window.Vapi && typeof window.Vapi === 'function';
+    }
+
+    // ---- DYNAMIC SDK LOADING ----
+    async function loadSDK() {
+      if (sdkLoaded || sdkLoading) return sdkLoaded;
+      
+      sdkLoading = true;
+      setStatus('🔄 Loading Vapi SDK...', 'thinking');
+
+      // First check if SDK is already loaded
+      if (window.Vapi && typeof window.Vapi === 'function') {
+        sdkLoaded = true;
+        sdkLoading = false;
+        setStatus('✅ SDK ready', 'inactive');
+        return true;
+      }
+
+      // Try loading from multiple possible paths
+      for (const path of SDK_PATHS) {
+        try {
+          console.log(`[SDK] Attempting to load from: ${path}`);
+          
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = path;
+            script.onload = () => {
+              console.log(`[SDK] Successfully loaded from: ${path}`);
+              resolve();
+            };
+            script.onerror = () => {
+              console.warn(`[SDK] Failed to load from: ${path}`);
+              reject(new Error(`Failed to load from ${path}`));
+            };
+            
+            // Add timeout
+            setTimeout(() => {
+              if (!script.onload.called) {
+                reject(new Error(`Timeout loading from ${path}`));
+              }
+            }, 5000);
+            
+            document.head.appendChild(script);
+          });
+
+          // Verify SDK is actually available
+          if (window.Vapi && typeof window.Vapi === 'function') {
+            sdkLoaded = true;
+            sdkLoading = false;
+            setStatus('✅ SDK loaded successfully', 'inactive');
+            return true;
+          }
+        } catch (error) {
+          // Continue to next path
+          continue;
+        }
+      }
+
+      // If we get here, all paths failed
+      sdkLoading = false;
+      const errorMsg = '❌ Cannot find vapi.js. Please ensure it exists in one of these locations: ' + SDK_PATHS.join(', ');
+      setStatus(errorMsg, 'error');
+      console.error('[SDK] Load failed. Tried paths:', SDK_PATHS);
+      return false;
     }
 
     // ---- AUDIO + MIC HELPERS ----
@@ -189,143 +268,287 @@
       try {
         if (!audioCtx) {
           const AC = window.AudioContext || window.webkitAudioContext;
-          if (AC) audioCtx = new AC();
+          if (AC) {
+            audioCtx = new AC();
+          } else {
+            throw new Error('AudioContext not supported');
+          }
         }
-        if (audioCtx && audioCtx.state === 'suspended') {
+        if (audioCtx.state === 'suspended') {
           await audioCtx.resume();
+          console.log('[Audio] Context resumed');
         }
+        return true;
       } catch (e) {
-        console.warn('AudioContext resume failed (will try to continue):', e);
+        console.warn('AudioContext setup failed:', e);
+        return false;
       }
     }
 
     async function ensureMic() {
-      // Get/keep a mic stream alive so the browser prompts the user and a track is available.
-      // DO NOT stop the tracks immediately; some browsers close the session if no track is active.
       if (micStream && micStream.active) return true;
+      
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { 
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        });
+        console.log('[Mic] Permission granted and stream active');
         return true;
       } catch (err) {
-        console.error('Mic permission denied or unavailable', err);
-        setStatus('❌ Microphone permission denied', 'inactive');
+        console.error('Microphone access failed:', err);
+        
+        let errorMsg = '❌ Microphone access denied';
+        if (err.name === 'NotFoundError') {
+          errorMsg = '❌ No microphone found';
+        } else if (err.name === 'NotAllowedError') {
+          errorMsg = '❌ Microphone permission denied';
+        } else if (err.name === 'NotReadableError') {
+          errorMsg = '❌ Microphone is busy or unavailable';
+        }
+        
+        setStatus(errorMsg, 'error');
         return false;
       }
     }
 
     function releaseMic(reason = '') {
       if (micStream) {
-        try { micStream.getTracks().forEach(t => t.stop()); } catch {}
+        try {
+          micStream.getTracks().forEach(track => {
+            track.stop();
+            console.log('[Mic] Track stopped:', track.kind);
+          });
+        } catch (e) {
+          console.warn('[Mic] Error stopping tracks:', e);
+        }
         micStream = null;
-        if (reason) console.log('[Mic] released:', reason);
+        if (reason) console.log('[Mic] Released:', reason);
       }
     }
 
-    // ---- START / STOP VOICE ----
+    // ---- VOICE FUNCTIONALITY ----
     async function startVoice() {
-      // 1) Make sure browser will allow audio playback after this click
-      await ensureAudioContext();
-
-      // 2) Make sure mic permission is granted and track is alive
-      if (!(await ensureMic())) return;
-
-      // 3) SDK must already be loaded by <script src="assets/vapi.js">
-      if (!sdkReady()) {
-        console.error('Vapi SDK not found. Ensure <script src="assets/vapi.js"> is present and docs/assets/vapi.js exists.');
-        setStatus('❌ SDK not found (place vapi.js in docs/assets/)', 'inactive');
-        return;
-      }
-
-      // 4) Validate keys
-      if (!PUBLIC_KEY || !ASSISTANT_ID) {
-        console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
-        setStatus('❌ Missing Vapi keys', 'inactive');
-        return;
-      }
-
+      // Disable button to prevent double-clicks
+      voiceBtn.disabled = true;
+      
       try {
+        // 1. Ensure SDK is loaded
+        if (!(await loadSDK())) {
+          return;
+        }
+
+        // 2. Validate configuration
+        if (!PUBLIC_KEY || !ASSISTANT_ID) {
+          setStatus('❌ Missing Vapi configuration keys', 'error');
+          console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
+          return;
+        }
+
+        // 3. Setup audio context (required for autoplay policies)
+        await ensureAudioContext();
+
+        // 4. Request microphone permission
+        if (!(await ensureMic())) {
+          return;
+        }
+
+        // 5. Initialize Vapi client if needed
         if (!vapi) {
           vapi = new window.Vapi(PUBLIC_KEY);
 
-          // Verbose event logging so we can see what happens
-          vapi.on('call-start', (p) => {
-            console.log('[Vapi] call-start', p);
+          // Setup comprehensive event handling
+          vapi.on('call-start', (params) => {
+            console.log('[Vapi] Call started:', params);
             isListening = true;
             setStatus('🔴 Connected - Speak now!', 'listening');
             voiceViz.classList.add('active');
-            // We can now safely release the pre-permission mic stream if we want.
-            // Comment out the next line if your browser needs the original stream to stay open.
-            // releaseMic('Vapi call-start');
           });
 
-          vapi.on('call-end', (p) => {
-            console.warn('[Vapi] call-end', p);
+          vapi.on('call-end', (params) => {
+            console.log('[Vapi] Call ended:', params);
             isListening = false;
             setStatus('✅ Ready to assist', 'inactive');
             voiceViz.classList.remove('active');
-            // Ensure mic is released if the call ends
-            releaseMic('call-end');
+            voiceBtn.disabled = false;
+            releaseMic('call ended');
           });
 
-          // Some builds provide extra WebRTC / status events; log them if present
-          vapi.on?.('webrtc-state', (s) => console.log('[Vapi] webrtc-state', s));
-          vapi.on?.('status', (s) => console.log('[Vapi] status', s));
-          vapi.on('speech-start', () => voiceViz.classList.add('active'));
-          vapi.on('speech-end', () => voiceViz.classList.remove('active'));
-
-          vapi.on('message', (p) => {
-            if (p?.type === 'transcript' && p.transcriptType === 'final') addMsg('user', p.transcript);
-            if (p?.type === 'assistant-response' && p.message) addMsg('ai', p.message);
+          vapi.on('speech-start', () => {
+            console.log('[Vapi] Speech started');
+            voiceViz.classList.add('active');
+            setStatus('🎤 Listening...', 'listening');
           });
 
-          vapi.on('error', (e) => {
-            console.error('[Vapi Error]', e);
-            setStatus('❌ Voice error — see console', 'inactive');
-            // Keep mic around a moment so you can retry without reprompt
-            setTimeout(() => releaseMic('error'), 1000);
+          vapi.on('speech-end', () => {
+            console.log('[Vapi] Speech ended');
+            voiceViz.classList.remove('active');
+            setStatus('🤖 AI responding...', 'thinking');
           });
+
+          vapi.on('message', (message) => {
+            console.log('[Vapi] Message received:', message);
+            
+            if (message?.type === 'transcript' && message.transcriptType === 'final') {
+              addMsg('user', message.transcript);
+            }
+            
+            if (message?.type === 'assistant-response' && message.message) {
+              addMsg('ai', message.message);
+              setStatus('🔴 Connected - Speak now!', 'listening');
+            }
+          });
+
+          vapi.on('error', (error) => {
+            console.error('[Vapi] Error:', error);
+            isListening = false;
+            voiceViz.classList.remove('active');
+            voiceBtn.disabled = false;
+            
+            let errorMsg = '❌ Voice error occurred';
+            if (error.message) {
+              errorMsg += `: ${error.message}`;
+            }
+            setStatus(errorMsg, 'error');
+            
+            setTimeout(() => releaseMic('error occurred'), 1000);
+          });
+
+          // Additional event listeners for debugging
+          if (typeof vapi.on === 'function') {
+            vapi.on('webrtc-state', (state) => console.log('[Vapi] WebRTC state:', state));
+            vapi.on('status', (status) => console.log('[Vapi] Status:', status));
+          }
         }
 
-        setStatus('🎤 Starting voice…', 'thinking');
-
-        // 5) Start the call. If your SDK accepts options, pass them here (example shown):
-        // await vapi.start(ASSISTANT_ID, { enableMic: true });
+        // 6. Start the voice call
+        setStatus('🎤 Starting voice connection...', 'thinking');
+        console.log('[Vapi] Starting call with assistant:', ASSISTANT_ID);
+        
         await vapi.start(ASSISTANT_ID);
 
-      } catch (err) {
-        console.error('Start failed', err);
-        setStatus('❌ Start failed — see console', 'inactive');
-        // release after failure
-        releaseMic('start-failed');
+      } catch (error) {
+        console.error('[Voice] Start failed:', error);
+        isListening = false;
+        voiceBtn.disabled = false;
+        voiceViz.classList.remove('active');
+        
+        let errorMsg = '❌ Failed to start voice chat';
+        if (error.message) {
+          errorMsg += `: ${error.message}`;
+        }
+        setStatus(errorMsg, 'error');
+        
+        releaseMic('start failed');
       }
     }
 
     function stopVoice() {
-      try { vapi && vapi.stop && vapi.stop(); } catch (e) { console.warn('stop error', e); }
+      try {
+        if (vapi && typeof vapi.stop === 'function') {
+          vapi.stop();
+          console.log('[Vapi] Stop called');
+        }
+      } catch (e) {
+        console.warn('[Vapi] Stop error:', e);
+      }
+      
       isListening = false;
+      voiceBtn.disabled = false;
       voiceViz.classList.remove('active');
       setStatus('Text mode active', 'inactive');
       releaseMic('manual stop');
     }
 
-    // ---- UI WIRING ----
-    floatingIcon.addEventListener('click', () => { holo.classList.add('active'); setStatus('Choose Voice or Text', 'inactive'); });
-    closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
-    voiceBtn.addEventListener('click', () => { voiceBtn.classList.add('active'); textBtn.classList.remove('active'); chatContainer.classList.remove('active'); startVoice(); });
-    textBtn.addEventListener('click', () => { textBtn.classList.add('active'); voiceBtn.classList.remove('active'); chatContainer.classList.add('active'); stopVoice(); chatInput.focus(); });
-    sendBtn.addEventListener('click', () => {
+    // ---- TEXT CHAT FUNCTIONALITY ----
+    function sendTextMessage() {
       const msg = chatInput.value.trim();
       if (!msg) return;
+      
       addMsg('user', msg);
       chatInput.value = '';
-      if (isListening && vapi) {
-        try { vapi.send({ type: 'add-message', message: { role: 'user', content: msg } }); setStatus('AI thinking…', 'thinking'); } catch {}
+      
+      if (isListening && vapi && typeof vapi.send === 'function') {
+        try {
+          vapi.send({ 
+            type: 'add-message', 
+            message: { role: 'user', content: msg } 
+          });
+          setStatus('AI thinking…', 'thinking');
+        } catch (e) {
+          console.warn('[Text] Failed to send via Vapi:', e);
+          // Fallback to mock response
+          setTimeout(() => {
+            addMsg('ai', "I'm here and listening. What would you like to do next?");
+            setStatus('Text mode active', 'inactive');
+          }, 700);
+        }
       } else {
+        // Mock AI response for text mode
         setStatus('AI thinking…', 'thinking');
-        setTimeout(() => { addMsg('ai', "I'm here and listening. What would you like to do next?"); setStatus('Text mode active', 'inactive'); }, 700);
+        setTimeout(() => {
+          addMsg('ai', "I'm here and listening. What would you like to do next?");
+          setStatus('Text mode active', 'inactive');
+        }, 700);
+      }
+    }
+
+    // ---- EVENT LISTENERS ----
+    floatingIcon.addEventListener('click', () => {
+      holo.classList.add('active');
+      setStatus('Choose Voice or Text mode', 'inactive');
+    });
+
+    closeBtn.addEventListener('click', () => {
+      holo.classList.remove('active');
+      stopVoice();
+    });
+
+    voiceBtn.addEventListener('click', () => {
+      voiceBtn.classList.add('active');
+      textBtn.classList.remove('active');
+      chatContainer.classList.remove('active');
+      startVoice();
+    });
+
+    textBtn.addEventListener('click', () => {
+      textBtn.classList.add('active');
+      voiceBtn.classList.remove('active');
+      chatContainer.classList.add('active');
+      stopVoice();
+      
+      // Focus input after a brief delay to ensure it's visible
+      setTimeout(() => chatInput.focus(), 100);
+    });
+
+    sendBtn.addEventListener('click', sendTextMessage);
+
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendTextMessage();
       }
     });
 
-    console.log('[Assistant] GitHub Pages build: SDK loaded via <script src="assets/vapi.js">');
+    // ---- CLEANUP ----
+    window.addEventListener('beforeunload', () => {
+      stopVoice();
+      releaseMic('page unload');
+    });
+
+    // ---- INITIALIZATION ----
+    console.log('[Assistant] Initialized - GitHub Pages build with dynamic SDK loading');
+    console.log('[Assistant] Will attempt to load SDK from:', SDK_PATHS);
+    
+    // Try to preload SDK on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      loadSDK().catch(e => console.warn('[SDK] Preload failed:', e));
+    });
+
   })();
 </script>
+</body>
+</html>
