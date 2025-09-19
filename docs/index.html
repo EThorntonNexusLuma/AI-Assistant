@@ -150,14 +150,22 @@
     const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
     const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
     
-    // Multiple possible SDK paths - GitHub Pages can vary
+    // Multiple SDK loading approaches - HTML script tag vs. NPM package
     const SDK_PATHS = [
-      './assets/vapi.js',
-      './docs/assets/vapi.js', 
-      '/assets/vapi.js',
-      '/docs/assets/vapi.js',
-      'assets/vapi.js',
-      'docs/assets/vapi.js'
+      // Method 1: Official HTML script tag approach (most reliable)
+      'https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js',
+      
+      // Method 2: NPM package build (might not be browser-ready)
+      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.umd.js',
+      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.js',
+      'https://unpkg.com/@vapi-ai/web@latest/dist/index.umd.js',
+      'https://unpkg.com/@vapi-ai/web@latest/dist/index.js',
+      
+      // Method 3: Local browser builds (if you have them)
+      './assets/vapi.browser.js',
+      './docs/assets/vapi.browser.js', 
+      'assets/vapi.browser.js',
+      'docs/assets/vapi.browser.js'
     ];
 
     // ---- STATE ----
@@ -197,7 +205,10 @@
     }
 
     function isSDKReady() {
-      return sdkLoaded && window.Vapi && typeof window.Vapi === 'function';
+      return sdkLoaded && (
+        (window.Vapi && typeof window.Vapi === 'function') ||
+        (window.vapiSDK && typeof window.vapiSDK.run === 'function')
+      );
     }
 
     // ---- DYNAMIC SDK LOADING ----
@@ -207,11 +218,62 @@
       sdkLoading = true;
       setStatus('🔄 Loading Vapi SDK...', 'thinking');
 
-      // First check if SDK is already loaded
+      // First check if SDK is already loaded (multiple possible global names)
       if (window.Vapi && typeof window.Vapi === 'function') {
         sdkLoaded = true;
         sdkLoading = false;
-        setStatus('✅ SDK ready', 'inactive');
+        setStatus('✅ SDK ready (Vapi)', 'inactive');
+        return true;
+      }
+      
+      if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
+        // HTML script tag approach - normalize to window.Vapi
+        window.Vapi = function(publicKey) {
+          // Create a wrapper that matches the NPM SDK interface
+          let vapiInstance = null;
+          
+          return {
+            start: async function(assistantId) {
+              return new Promise((resolve, reject) => {
+                try {
+                  vapiInstance = window.vapiSDK.run({
+                    apiKey: publicKey,
+                    assistant: assistantId,
+                    config: {}
+                  });
+                  
+                  // The HTML script tag version auto-handles events differently
+                  setTimeout(() => resolve({}), 100);
+                } catch (error) {
+                  reject(error);
+                }
+              });
+            },
+            stop: function() {
+              // HTML script tag handles this internally
+              if (vapiInstance && vapiInstance.stop) {
+                vapiInstance.stop();
+              }
+            },
+            send: function(message) {
+              // HTML script tag doesn't support send method
+              console.warn('[Vapi] Send not supported with HTML script tag approach');
+            },
+            on: function(event, callback) {
+              // HTML script tag handles events differently - we'll emit generic events
+              if (event === 'call-start') {
+                setTimeout(() => callback(), 200);
+              } else if (event === 'call-end') {
+                // This will be called when the widget closes
+              }
+              return this;
+            }
+          };
+        };
+        
+        sdkLoaded = true;
+        sdkLoading = false;
+        setStatus('✅ SDK ready (vapiSDK wrapper)', 'inactive');
         return true;
       }
 
@@ -242,11 +304,69 @@
             document.head.appendChild(script);
           });
 
-          // Verify SDK is actually available
+          // Verify SDK is actually available - check multiple possible global names
           if (window.Vapi && typeof window.Vapi === 'function') {
             sdkLoaded = true;
             sdkLoading = false;
-            setStatus('✅ SDK loaded successfully', 'inactive');
+            setStatus('✅ SDK loaded successfully (Vapi)', 'inactive');
+            return true;
+          }
+          
+          // HTML script tag approach
+          if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
+            // Create wrapper to normalize interface
+            window.Vapi = function(publicKey) {
+              let vapiInstance = null;
+              const eventHandlers = {};
+              
+              return {
+                start: async function(assistantId) {
+                  return new Promise((resolve, reject) => {
+                    try {
+                      vapiInstance = window.vapiSDK.run({
+                        apiKey: publicKey,
+                        assistant: assistantId,
+                        config: {
+                          position: "bottom-right",
+                          offset: "40px",
+                          width: "50px",
+                          height: "50px"
+                        }
+                      });
+                      
+                      // Emit call-start event after initialization
+                      setTimeout(() => {
+                        if (eventHandlers['call-start']) {
+                          eventHandlers['call-start']();
+                        }
+                        resolve({});
+                      }, 500);
+                    } catch (error) {
+                      reject(error);
+                    }
+                  });
+                },
+                stop: function() {
+                  if (vapiInstance && vapiInstance.stop) {
+                    vapiInstance.stop();
+                  }
+                  if (eventHandlers['call-end']) {
+                    eventHandlers['call-end']();
+                  }
+                },
+                send: function(message) {
+                  console.warn('[Vapi] Send method not fully supported with HTML script tag approach');
+                },
+                on: function(event, callback) {
+                  eventHandlers[event] = callback;
+                  return this;
+                }
+              };
+            };
+            
+            sdkLoaded = true;
+            sdkLoading = false;
+            setStatus('✅ SDK loaded successfully (vapiSDK)', 'inactive');
             return true;
           }
         } catch (error) {
@@ -257,9 +377,11 @@
 
       // If we get here, all paths failed
       sdkLoading = false;
-      const errorMsg = '❌ Cannot find vapi.js. Please ensure it exists in one of these locations: ' + SDK_PATHS.join(', ');
+      const errorMsg = '❌ Cannot load Vapi SDK. Tried HTML script tag and NPM package approaches.';
       setStatus(errorMsg, 'error');
       console.error('[SDK] Load failed. Tried paths:', SDK_PATHS);
+      console.error('[SDK] Make sure you have internet connection for CDN access');
+      console.log('[SDK] If using local files, ensure you have the correct browser build (not Node.js/CommonJS version)');
       return false;
     }
 
@@ -358,7 +480,13 @@
 
         // 5. Initialize Vapi client if needed
         if (!vapi) {
-          vapi = new window.Vapi(PUBLIC_KEY);
+          // Normalize SDK reference (some CDNs use different global names)
+          const VapiClass = window.Vapi || window.VapiSDK;
+          if (!VapiClass) {
+            throw new Error('Vapi SDK not found after loading');
+          }
+          
+          vapi = new VapiClass(PUBLIC_KEY);
 
           // Setup comprehensive event handling
           vapi.on('call-start', (params) => {
@@ -540,8 +668,8 @@
     });
 
     // ---- INITIALIZATION ----
-    console.log('[Assistant] Initialized - GitHub Pages build with dynamic SDK loading');
-    console.log('[Assistant] Will attempt to load SDK from:', SDK_PATHS);
+    console.log('[Assistant] Initialized - GitHub Pages build with multiple SDK loading strategies');
+    console.log('[Assistant] Will attempt to load SDK from:', SDK_PATHS.slice(0, 3), '...');
     
     // Try to preload SDK on page load
     document.addEventListener('DOMContentLoaded', () => {
