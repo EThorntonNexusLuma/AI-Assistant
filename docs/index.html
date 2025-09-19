@@ -210,6 +210,66 @@
       );
     }
 
+    // ---- DEBUG HELPERS ----
+    function debugAudioSetup() {
+      console.log('\n🔧 === AUDIO DEBUG INFO ===');
+      console.log('AudioContext state:', audioCtx?.state || 'not created');
+      console.log('Audio elements on page:', document.querySelectorAll('audio').length);
+      
+      const audioElements = document.querySelectorAll('audio');
+      audioElements.forEach((audio, i) => {
+        console.log(`Audio element ${i}:`, {
+          id: audio.id,
+          src: audio.src,
+          autoplay: audio.autoplay,
+          muted: audio.muted,
+          paused: audio.paused,
+          volume: audio.volume,
+          readyState: audio.readyState
+        });
+      });
+      
+      console.log('Browser info:', {
+        userAgent: navigator.userAgent.substring(0, 50) + '...',
+        vendor: navigator.vendor,
+        platform: navigator.platform
+      });
+      
+      console.log('🔧 === END AUDIO DEBUG ===\n');
+    }
+
+    // Add debug button functionality (can be called from console)
+    window.debugVapi = debugAudioSetup;
+    
+    // Add audio test function (can be called from console)
+    window.testAudio = async function() {
+      console.log('🔊 Testing audio output...');
+      try {
+        await ensureAudioContext();
+        await testAudioOutput();
+        
+        // Play a test beep
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 440; // A4 note
+        gainNode.gain.value = 0.1; // Low volume
+        
+        oscillator.start();
+        setTimeout(() => oscillator.stop(), 500);
+        
+        console.log('🔊 If you heard a beep, audio output is working!');
+        setStatus('🔊 Test beep played - check volume', 'inactive');
+      } catch (error) {
+        console.error('🔊 Audio test failed:', error);
+        setStatus('❌ Audio test failed', 'error');
+      }
+    };
+
     // ---- DYNAMIC SDK LOADING ----
     async function loadSDK() {
       if (sdkLoaded || sdkLoading) return sdkLoaded;
@@ -318,7 +378,7 @@
           
           // HTML script tag approach
           if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
-            console.log('[SDK] Found window.vapiSDK.run function');
+            console.log('[SDK] Found window.vapiSDK.run function - creating enhanced wrapper');
             // Create wrapper to normalize interface
             window.Vapi = function(publicKey) {
               let vapiInstance = null;
@@ -328,7 +388,12 @@
                 start: async function(assistantId) {
                   return new Promise((resolve, reject) => {
                     try {
-                      console.log('[SDK] Starting vapiSDK with:', { publicKey: publicKey.substring(0, 10) + '...', assistantId });
+                      console.log('[SDK] Starting vapiSDK with enhanced config:', { 
+                        publicKey: publicKey.substring(0, 10) + '...', 
+                        assistantId 
+                      });
+                      
+                      // Enhanced configuration for better audio handling
                       vapiInstance = window.vapiSDK.run({
                         apiKey: publicKey,
                         assistant: assistantId,
@@ -336,17 +401,43 @@
                           position: "bottom-right",
                           offset: "40px",
                           width: "50px",
-                          height: "50px"
+                          height: "50px",
+                          // Audio-specific configurations
+                          autoplay: true,
+                          muted: false
                         }
                       });
                       
-                      // Emit call-start event after initialization
+                      console.log('[SDK] vapiSDK instance created:', vapiInstance);
+                      
+                      // Wait a bit longer for the call to establish and for first message
                       setTimeout(() => {
+                        console.log('[SDK] Emitting call-start event');
                         if (eventHandlers['call-start']) {
                           eventHandlers['call-start']();
                         }
+                        
+                        // Check for any audio elements that might have been created
+                        const audioElements = document.querySelectorAll('audio');
+                        console.log('[SDK] Audio elements found:', audioElements.length);
+                        audioElements.forEach((audio, index) => {
+                          console.log(`[SDK] Audio element ${index}:`, {
+                            src: audio.src,
+                            autoplay: audio.autoplay,
+                            muted: audio.muted,
+                            paused: audio.paused
+                          });
+                          
+                          // Ensure audio elements are configured for playback
+                          audio.autoplay = true;
+                          audio.muted = false;
+                          if (audio.paused) {
+                            audio.play().catch(e => console.warn('[SDK] Audio play failed:', e));
+                          }
+                        });
+                        
                         resolve({});
-                      }, 500);
+                      }, 1000);
                     } catch (error) {
                       console.error('[SDK] Error starting vapiSDK:', error);
                       reject(error);
@@ -363,9 +454,13 @@
                   }
                 },
                 send: function(message) {
+                  console.log('[SDK] Send called with:', message);
+                  // The HTML script tag approach handles this differently
+                  // For now, just log that it's not fully supported
                   console.warn('[Vapi] Send method not fully supported with HTML script tag approach');
                 },
                 on: function(event, callback) {
+                  console.log('[SDK] Event listener registered for:', event);
                   eventHandlers[event] = callback;
                   return this;
                 }
@@ -409,17 +504,50 @@
           const AC = window.AudioContext || window.webkitAudioContext;
           if (AC) {
             audioCtx = new AC();
+            console.log('[Audio] AudioContext created');
           } else {
             throw new Error('AudioContext not supported');
           }
         }
         if (audioCtx.state === 'suspended') {
           await audioCtx.resume();
-          console.log('[Audio] Context resumed');
+          console.log('[Audio] AudioContext resumed from suspended state');
         }
+        console.log('[Audio] AudioContext state:', audioCtx.state);
         return true;
       } catch (e) {
         console.warn('AudioContext setup failed:', e);
+        return false;
+      }
+    }
+
+    // Add audio element to handle AI voice output
+    function ensureAudioOutput() {
+      // Create a dedicated audio element for AI voice if it doesn't exist
+      let aiAudioElement = document.getElementById('vapi-ai-audio');
+      if (!aiAudioElement) {
+        aiAudioElement = document.createElement('audio');
+        aiAudioElement.id = 'vapi-ai-audio';
+        aiAudioElement.autoplay = true;
+        aiAudioElement.style.display = 'none';
+        document.body.appendChild(aiAudioElement);
+        console.log('[Audio] Created AI audio output element');
+      }
+      return aiAudioElement;
+    }
+
+    // Test audio output capability
+    async function testAudioOutput() {
+      try {
+        const aiAudio = ensureAudioOutput();
+        // Test if we can play a silent audio to unlock autoplay
+        const audioData = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        aiAudio.src = audioData;
+        await aiAudio.play();
+        console.log('[Audio] Test audio playback successful');
+        return true;
+      } catch (e) {
+        console.warn('[Audio] Test audio playback failed:', e);
         return false;
       }
     }
@@ -488,14 +616,19 @@
         }
 
         // 3. Setup audio context (required for autoplay policies)
+        console.log('[Audio] Setting up audio context and output...');
         await ensureAudioContext();
+        
+        // 4. Test and prepare audio output
+        ensureAudioOutput();
+        await testAudioOutput();
 
-        // 4. Request microphone permission
+        // 5. Request microphone permission
         if (!(await ensureMic())) {
           return;
         }
 
-        // 5. Initialize Vapi client if needed
+        // 6. Initialize Vapi client if needed
         if (!vapi) {
           // Normalize SDK reference (some CDNs use different global names)
           const VapiClass = window.Vapi || window.VapiSDK;
@@ -503,14 +636,39 @@
             throw new Error('Vapi SDK not found after loading');
           }
           
+          console.log('[Vapi] Creating new Vapi instance...');
           vapi = new VapiClass(PUBLIC_KEY);
 
           // Setup comprehensive event handling
           vapi.on('call-start', (params) => {
-            console.log('[Vapi] Call started:', params);
+            console.log('[Vapi] ✅ Call started - AI should speak soon:', params);
             isListening = true;
-            setStatus('🔴 Connected - Speak now!', 'listening');
+            setStatus('🔴 Connected - AI will speak first', 'listening');
             voiceViz.classList.add('active');
+            
+            // Additional audio setup after call starts
+            setTimeout(() => {
+              ensureAudioOutput();
+              console.log('[Audio] Audio output re-ensured after call start');
+              
+              // If user still doesn't hear anything after 3 seconds, show help
+              setTimeout(() => {
+                if (isListening) {
+                  console.log('💡 If you don\'t hear the AI speaking:');
+                  console.log('  1. Check your volume/mute settings');
+                  console.log('  2. Type: testAudio() in console to test speakers');
+                  console.log('  3. Type: debugVapi() in console for detailed info');
+                  setStatus('🔴 Connected - No audio? Check volume/speakers', 'listening');
+                  
+                  // Show detailed help after 6 seconds
+                  setTimeout(() => {
+                    if (isListening) {
+                      setStatus('💡 Open browser console (F12) for audio help', 'thinking');
+                    }
+                  }, 3000);
+                }
+              }, 3000);
+            }, 100);
           });
 
           vapi.on('call-end', (params) => {
@@ -523,13 +681,13 @@
           });
 
           vapi.on('speech-start', () => {
-            console.log('[Vapi] Speech started');
+            console.log('[Vapi] 🎤 User speech started');
             voiceViz.classList.add('active');
             setStatus('🎤 Listening...', 'listening');
           });
 
           vapi.on('speech-end', () => {
-            console.log('[Vapi] Speech ended');
+            console.log('[Vapi] 🎤 User speech ended');
             voiceViz.classList.remove('active');
             setStatus('🤖 AI responding...', 'thinking');
           });
@@ -545,10 +703,15 @@
               addMsg('ai', message.message);
               setStatus('🔴 Connected - Speak now!', 'listening');
             }
+
+            // Log any function calls or other message types
+            if (message?.type === 'function-call') {
+              console.log('[Vapi] Function call:', message);
+            }
           });
 
           vapi.on('error', (error) => {
-            console.error('[Vapi] Error:', error);
+            console.error('[Vapi] ❌ Error:', error);
             isListening = false;
             voiceViz.classList.remove('active');
             voiceBtn.disabled = false;
@@ -562,18 +725,36 @@
             setTimeout(() => releaseMic('error occurred'), 1000);
           });
 
-          // Additional event listeners for debugging
+          // Additional event listeners for debugging audio
           if (typeof vapi.on === 'function') {
             vapi.on('webrtc-state', (state) => console.log('[Vapi] WebRTC state:', state));
             vapi.on('status', (status) => console.log('[Vapi] Status:', status));
+            vapi.on('volume-level', (volume) => console.log('[Vapi] AI volume level:', volume));
           }
         }
 
-        // 6. Start the voice call
+        // 7. Start the voice call
         setStatus('🎤 Starting voice connection...', 'thinking');
         console.log('[Vapi] Starting call with assistant:', ASSISTANT_ID);
+        console.log('[Vapi] Expected: AI should speak first with greeting message');
         
-        await vapi.start(ASSISTANT_ID);
+        const result = await vapi.start(ASSISTANT_ID);
+        console.log('[Vapi] Start result:', result);
+
+        // Extra debugging for audio
+        setTimeout(() => {
+          console.log('[Debug] Call state after 2 seconds:');
+          console.log('  - isListening:', isListening);
+          console.log('  - Audio elements:', document.querySelectorAll('audio').length);
+          console.log('  - AudioContext state:', audioCtx?.state);
+          
+          if (isListening) {
+            console.log('[Debug] ✅ Call is active - if you don\'t hear AI, check:');
+            console.log('  1. Volume/mute settings');
+            console.log('  2. Assistant configuration (first message)');
+            console.log('  3. Browser autoplay policy');
+          }
+        }, 2000);
 
       } catch (error) {
         console.error('[Voice] Start failed:', error);
@@ -588,6 +769,13 @@
         setStatus(errorMsg, 'error');
         
         releaseMic('start failed');
+      } finally {
+        // Re-enable button after a delay to prevent rapid clicking
+        setTimeout(() => {
+          if (!isListening) {
+            voiceBtn.disabled = false;
+          }
+        }, 2000);
       }
     }
 
