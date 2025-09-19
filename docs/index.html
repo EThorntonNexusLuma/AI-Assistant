@@ -144,57 +144,40 @@
     </div>
   </div>
 
-  <script>
+<script>
   (function () {
-    // ---- CONFIGURATION ----
-    const PUBLIC_KEY = (document.body.dataset.vapiPublicKey || '').trim();
+    const PUBLIC_KEY   = (document.body.dataset.vapiPublicKey   || '').trim();
     const ASSISTANT_ID = (document.body.dataset.vapiAssistantId || '').trim();
-    
-    // SDK loading approaches - prioritizing working CDN methods
-    const SDK_PATHS = [
-      // Method 1: Official HTML script tag approach (most reliable for your setup)
-      'https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js',
-      
-      // Method 2: Try different CDN endpoints for NPM package
-      'https://unpkg.com/@vapi-ai/web@latest/dist/index.js',
-      'https://unpkg.com/@vapi-ai/web@latest/dist/vapi.js',
-      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/index.js',
-      'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.js',
-      
-      // Method 3: Local files (Note: your current vapi.js is CommonJS format and won't work)
-      // We'll skip these since your file is Node.js format, not browser format
-      // 'assets/vapi.js',  // Your file is CommonJS, not browser-ready
-      // 'assets/vapi.browser.js', // Uncomment if you get browser build
-    ];
 
-    // ---- STATE ----
-    let vapi = null;
-    let isListening = false;
-    let micStream = null;
-    let audioCtx = null;
-    let sdkLoaded = false;
-    let sdkLoading = false;
+    // ---- DOM
+    const floatingIcon   = document.getElementById('floatingIcon');
+    const holo           = document.getElementById('holographicInterface');
+    const closeBtn       = document.getElementById('closeBtn');
+    const voiceBtn       = document.getElementById('voiceBtn');
+    const textBtn        = document.getElementById('textBtn');
+    const chatContainer  = document.getElementById('chatContainer');
+    const chatMessages   = document.getElementById('chatMessages');
+    const chatInput      = document.getElementById('chatInput');
+    const sendBtn        = document.getElementById('sendBtn');
+    const statusEl       = document.getElementById('status');
+    const voiceViz       = document.getElementById('voiceVisualizer');
 
-    // ---- UI HOOKS ----
-    const floatingIcon = document.getElementById('floatingIcon');
-    const holo = document.getElementById('holographicInterface');
-    const closeBtn = document.getElementById('closeBtn');
-    const voiceBtn = document.getElementById('voiceBtn');
-    const textBtn = document.getElementById('textBtn');
-    const chatContainer = document.getElementById('chatContainer');
-    const chatMessages = document.getElementById('chatMessages');
-    const chatInput = document.getElementById('chatInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const statusEl = document.getElementById('status');
-    const voiceViz = document.getElementById('voiceVisualizer');
+    // ---- STATE (parity with your React version)
+    let vapi = null;              // client instance (like useRef)
+    let connected = false;        // isConnected
+    let listening = false;        // isListening
+    let mode = 'voice';           // 'voice' | 'text'
+    let micPermission = 'prompt'; // 'prompt' | 'granted' | 'denied'
+    let micStream = null;         // keep alive until Vapi owns it
+    let audioCtx = null;          // autoplay fix
+    let starting = false;         // avoid double-start clicks
 
-    // ---- UTILITY FUNCTIONS ----
+    // ---------- helpers ----------
     function setStatus(text, cls) {
       statusEl.textContent = text;
-      statusEl.className = `status ${cls}`;
-      console.log('[Assistant Status]', text);
+      statusEl.className   = `status ${cls}`;
+      console.log('[Assistant]', text);
     }
-
     function addMsg(sender, text) {
       const el = document.createElement('div');
       el.className = `message ${sender}-message`;
@@ -202,805 +185,197 @@
       chatMessages.appendChild(el);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-
-    function isSDKReady() {
-      return sdkLoaded && (
-        (window.Vapi && typeof window.Vapi === 'function') ||
-        (window.vapiSDK && typeof window.vapiSDK.run === 'function')
-      );
+    function sdkReady() {
+      return !!(window.Vapi && typeof window.Vapi === 'function');
     }
-
-    // ---- DEBUG HELPERS ----
-    function debugAudioSetup() {
-      console.log('\n🔧 === AUDIO DEBUG INFO ===');
-      console.log('AudioContext state:', audioCtx?.state || 'not created');
-      console.log('Audio elements on page:', document.querySelectorAll('audio').length);
-      
-      const audioElements = document.querySelectorAll('audio');
-      audioElements.forEach((audio, i) => {
-        console.log(`Audio element ${i}:`, {
-          id: audio.id,
-          src: audio.src,
-          autoplay: audio.autoplay,
-          muted: audio.muted,
-          paused: audio.paused,
-          volume: audio.volume,
-          readyState: audio.readyState
-        });
-      });
-      
-      console.log('Browser info:', {
-        userAgent: navigator.userAgent.substring(0, 50) + '...',
-        vendor: navigator.vendor,
-        platform: navigator.platform
-      });
-      
-      console.log('🔧 === END AUDIO DEBUG ===\n');
-    }
-
-    // Add debug button functionality (can be called from console)
-    window.debugVapi = debugAudioSetup;
-    window.debugvapi = debugAudioSetup; // lowercase version for convenience
-    
-    // Add comprehensive audio debugging
-    window.fullAudioTest = async function() {
-      console.log('\n🔧 === COMPREHENSIVE AUDIO TEST ===');
-      
-      // 1. Test basic speaker functionality
-      console.log('🔊 Step 1: Testing basic audio output...');
-      try {
-        await ensureAudioContext();
-        console.log('✅ AudioContext created successfully');
-        
-        // Test beep
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.value = 440;
-        gainNode.gain.value = 0.1;
-        
-        oscillator.start();
-        setTimeout(() => oscillator.stop(), 500);
-        
-        console.log('🔊 Did you hear a beep? (This tests if your speakers work)');
-      } catch (e) {
-        console.error('❌ Basic audio test failed:', e);
-      }
-      
-      // 2. Check for Vapi audio elements
-      setTimeout(() => {
-        console.log('\n🔊 Step 2: Checking for Vapi audio elements...');
-        const audioElements = document.querySelectorAll('audio');
-        console.log(`Found ${audioElements.length} audio element(s)`);
-        
-        audioElements.forEach((audio, i) => {
-          console.log(`Audio Element ${i}:`, {
-            id: audio.id || 'no-id',
-            src: audio.src || 'no-src',
-            currentSrc: audio.currentSrc || 'no-currentSrc',
-            autoplay: audio.autoplay,
-            muted: audio.muted,
-            paused: audio.paused,
-            volume: audio.volume,
-            readyState: audio.readyState,
-            networkState: audio.networkState,
-            duration: audio.duration || 'unknown'
-          });
-          
-          // Try to force play each audio element
-          if (audio.paused) {
-            console.log(`Attempting to play audio element ${i}...`);
-            audio.play().then(() => {
-              console.log(`✅ Audio element ${i} playing`);
-            }).catch(err => {
-              console.log(`❌ Audio element ${i} play failed:`, err.message);
-            });
-          }
-        });
-        
-        // 3. Check WebRTC connection details
-        console.log('\n🔊 Step 3: WebRTC Debug Info...');
-        if (window.vapiSDK) {
-          console.log('✅ vapiSDK found');
-        } else {
-          console.log('❌ vapiSDK not found');
-        }
-        
-        if (vapi) {
-          console.log('✅ Vapi instance exists');
-        } else {
-          console.log('❌ No Vapi instance');
-        }
-        
-        console.log('Current call state:', {
-          isListening: isListening,
-          sdkLoaded: sdkLoaded,
-          audioCtxState: audioCtx?.state
-        });
-        
-        console.log('\n💡 TROUBLESHOOTING STEPS:');
-        console.log('1. If you heard the beep: Speakers work, issue is with Vapi audio routing');
-        console.log('2. If no beep: Check volume/mute, try headphones, check audio device');
-        console.log('3. If audio elements show but no sound: Try different browser (Chrome recommended)');
-        console.log('4. Check browser autoplay settings: chrome://settings/content/sound');
-        
-        console.log('\n🔧 === END COMPREHENSIVE TEST ===\n');
-      }, 1000);
-    };
-    
-    // Add audio test function (can be called from console)
-    window.testAudio = async function() {
-      console.log('🔊 Testing audio output...');
-      try {
-        await ensureAudioContext();
-        await testAudioOutput();
-        
-        // Play a test beep
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.value = 440; // A4 note
-        gainNode.gain.value = 0.1; // Low volume
-        
-        oscillator.start();
-        setTimeout(() => oscillator.stop(), 500);
-        
-        console.log('🔊 If you heard a beep, audio output is working!');
-        setStatus('🔊 Test beep played - check volume', 'inactive');
-      } catch (error) {
-        console.error('🔊 Audio test failed:', error);
-        setStatus('❌ Audio test failed', 'error');
-      }
-    };
-    
-    // Add lowercase version and shortcut
-    window.testaudio = window.testAudio; // lowercase version for convenience
-    window.test = window.testAudio; // even shorter version
-    window.fulltest = window.fullAudioTest; // comprehensive test
-    
-    // Show available console commands
-    console.log('\n🎛️ === AVAILABLE CONSOLE COMMANDS ===');
-    console.log('test() - Quick speaker test (plays beep)');
-    console.log('fulltest() - Comprehensive audio diagnosis');
-    console.log('debugvapi() - Show current audio debug info');
-    console.log('🎛️ === END COMMANDS ===\n');
-
-    // ---- DYNAMIC SDK LOADING ----
-    async function loadSDK() {
-      if (sdkLoaded || sdkLoading) return sdkLoaded;
-      
-      sdkLoading = true;
-      setStatus('🔄 Loading Vapi SDK...', 'thinking');
-
-      // First check if SDK is already loaded (multiple possible global names)
-      if (window.Vapi && typeof window.Vapi === 'function') {
-        sdkLoaded = true;
-        sdkLoading = false;
-        setStatus('✅ SDK ready (Vapi)', 'inactive');
-        return true;
-      }
-      
-      if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
-        // HTML script tag approach - normalize to window.Vapi
-        window.Vapi = function(publicKey) {
-          // Create a wrapper that matches the NPM SDK interface
-          let vapiInstance = null;
-          
-          return {
-            start: async function(assistantId) {
-              return new Promise((resolve, reject) => {
-                try {
-                  vapiInstance = window.vapiSDK.run({
-                    apiKey: publicKey,
-                    assistant: assistantId,
-                    config: {}
-                  });
-                  
-                  // The HTML script tag version auto-handles events differently
-                  setTimeout(() => resolve({}), 100);
-                } catch (error) {
-                  reject(error);
-                }
-              });
-            },
-            stop: function() {
-              // HTML script tag handles this internally
-              if (vapiInstance && vapiInstance.stop) {
-                vapiInstance.stop();
-              }
-            },
-            send: function(message) {
-              // HTML script tag doesn't support send method
-              console.warn('[Vapi] Send not supported with HTML script tag approach');
-            },
-            on: function(event, callback) {
-              // HTML script tag handles events differently - we'll emit generic events
-              if (event === 'call-start') {
-                setTimeout(() => callback(), 200);
-              } else if (event === 'call-end') {
-                // This will be called when the widget closes
-              }
-              return this;
-            }
-          };
-        };
-        
-        sdkLoaded = true;
-        sdkLoading = false;
-        setStatus('✅ SDK ready (vapiSDK wrapper)', 'inactive');
-        return true;
-      }
-
-      // Try loading from multiple possible paths
-      for (const path of SDK_PATHS) {
-        try {
-          console.log(`[SDK] Attempting to load from: ${path}`);
-          setStatus(`🔄 Trying: ${path.split('/').pop()}...`, 'thinking');
-          
-          await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = path;
-            script.onload = () => {
-              console.log(`[SDK] Successfully loaded script from: ${path}`);
-              resolve();
-            };
-            script.onerror = (error) => {
-              console.warn(`[SDK] Failed to load from: ${path}`, error);
-              reject(new Error(`Failed to load from ${path}`));
-            };
-            
-            // Add timeout
-            setTimeout(() => {
-              if (!script.onload.called) {
-                reject(new Error(`Timeout loading from ${path}`));
-              }
-            }, 10000); // Increased timeout to 10 seconds
-            
-            document.head.appendChild(script);
-          });
-
-          // Give a moment for globals to be set
-          await new Promise(resolve => setTimeout(resolve, 100));
-
-          // Verify SDK is actually available - check multiple possible global names
-          if (window.Vapi && typeof window.Vapi === 'function') {
-            console.log('[SDK] Found window.Vapi constructor');
-            sdkLoaded = true;
-            sdkLoading = false;
-            setStatus('✅ SDK loaded successfully (Vapi)', 'inactive');
-            return true;
-          }
-          
-          // HTML script tag approach
-          if (window.vapiSDK && typeof window.vapiSDK.run === 'function') {
-            console.log('[SDK] Found window.vapiSDK.run function - creating enhanced wrapper');
-            // Create wrapper to normalize interface
-            window.Vapi = function(publicKey) {
-              let vapiInstance = null;
-              const eventHandlers = {};
-              
-              return {
-                start: async function(assistantId) {
-                  return new Promise((resolve, reject) => {
-                    try {
-                      console.log('[SDK] Starting vapiSDK with enhanced config:', { 
-                        publicKey: publicKey.substring(0, 10) + '...', 
-                        assistantId 
-                      });
-                      
-                      // Enhanced configuration for better audio handling
-                      vapiInstance = window.vapiSDK.run({
-                        apiKey: publicKey,
-                        assistant: assistantId,
-                        config: {
-                          position: "bottom-right",
-                          offset: "40px",
-                          width: "50px",
-                          height: "50px",
-                          // Audio-specific configurations
-                          autoplay: true,
-                          muted: false
-                        }
-                      });
-                      
-                      console.log('[SDK] vapiSDK instance created:', vapiInstance);
-                      
-                      // Wait a bit longer for the call to establish and for first message
-                      setTimeout(() => {
-                        console.log('[SDK] Emitting call-start event');
-                        if (eventHandlers['call-start']) {
-                          eventHandlers['call-start']();
-                        }
-                        
-                        // Check for any audio elements that might have been created
-                        const audioElements = document.querySelectorAll('audio');
-                        console.log('[SDK] Audio elements found:', audioElements.length);
-                        audioElements.forEach((audio, index) => {
-                          console.log(`[SDK] Audio element ${index}:`, {
-                            src: audio.src,
-                            autoplay: audio.autoplay,
-                            muted: audio.muted,
-                            paused: audio.paused
-                          });
-                          
-                          // Ensure audio elements are configured for playback
-                          audio.autoplay = true;
-                          audio.muted = false;
-                          if (audio.paused) {
-                            audio.play().catch(e => console.warn('[SDK] Audio play failed:', e));
-                          }
-                        });
-                        
-                        resolve({});
-                      }, 1000);
-                    } catch (error) {
-                      console.error('[SDK] Error starting vapiSDK:', error);
-                      reject(error);
-                    }
-                  });
-                },
-                stop: function() {
-                  console.log('[SDK] Stopping vapiSDK');
-                  if (vapiInstance && vapiInstance.stop) {
-                    vapiInstance.stop();
-                  }
-                  if (eventHandlers['call-end']) {
-                    eventHandlers['call-end']();
-                  }
-                },
-                send: function(message) {
-                  console.log('[SDK] Send called with:', message);
-                  // The HTML script tag approach handles this differently
-                  // For now, just log that it's not fully supported
-                  console.warn('[Vapi] Send method not fully supported with HTML script tag approach');
-                },
-                on: function(event, callback) {
-                  console.log('[SDK] Event listener registered for:', event);
-                  eventHandlers[event] = callback;
-                  return this;
-                }
-              };
-            };
-            
-            sdkLoaded = true;
-            sdkLoading = false;
-            setStatus('✅ SDK loaded successfully (vapiSDK)', 'inactive');
-            return true;
-          }
-
-          console.warn(`[SDK] Script loaded from ${path} but no recognized globals found`);
-          console.log('[SDK] Available globals:', Object.keys(window).filter(key => key.toLowerCase().includes('vapi')));
-          
-        } catch (error) {
-          console.warn(`[SDK] Error loading from ${path}:`, error.message);
-          // Continue to next path
-          continue;
-        }
-      }
-
-      // If we get here, all paths failed
-      sdkLoading = false;
-      const errorMsg = '❌ Cannot load Vapi SDK from CDN. Check internet connection.';
-      setStatus(errorMsg, 'error');
-      console.error('[SDK] Load failed. Tried paths:', SDK_PATHS);
-      console.error('[SDK] Common causes:');
-      console.error('  1. No internet connection or CDN blocked');
-      console.error('  2. Your local vapi.js file is Node.js format (has "exports", "require") - not browser compatible');
-      console.error('  3. Need to use CDN or get browser build of Vapi SDK');
-      console.log('[SDK] Your local file at docs/assets/vapi.js is CommonJS format and cannot be used in browsers');
-      console.log('[SDK] The app will try CDN loading which should work if you have internet access');
-      return false;
-    }
-
-    // ---- AUDIO + MIC HELPERS ----
     async function ensureAudioContext() {
       try {
-        if (!audioCtx) {
-          const AC = window.AudioContext || window.webkitAudioContext;
-          if (AC) {
-            audioCtx = new AC();
-            console.log('[Audio] AudioContext created');
-          } else {
-            throw new Error('AudioContext not supported');
-          }
-        }
-        if (audioCtx.state === 'suspended') {
-          await audioCtx.resume();
-          console.log('[Audio] AudioContext resumed from suspended state');
-        }
-        console.log('[Audio] AudioContext state:', audioCtx.state);
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+      } catch (e) { console.warn('AudioContext resume failed', e); }
+    }
+    async function requestMic() {
+      if (micStream?.active) return true;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micPermission = 'granted';
         return true;
       } catch (e) {
-        console.warn('AudioContext setup failed:', e);
+        console.error('Mic permission denied/unavailable', e);
+        micPermission = 'denied';
+        setStatus('❌ Microphone access denied', 'inactive');
         return false;
       }
     }
-
-    // Add audio element to handle AI voice output
-    function ensureAudioOutput() {
-      // Create a dedicated audio element for AI voice if it doesn't exist
-      let aiAudioElement = document.getElementById('vapi-ai-audio');
-      if (!aiAudioElement) {
-        aiAudioElement = document.createElement('audio');
-        aiAudioElement.id = 'vapi-ai-audio';
-        aiAudioElement.autoplay = true;
-        aiAudioElement.style.display = 'none';
-        document.body.appendChild(aiAudioElement);
-        console.log('[Audio] Created AI audio output element');
-      }
-      return aiAudioElement;
-    }
-
-    // Test audio output capability
-    async function testAudioOutput() {
-      try {
-        const aiAudio = ensureAudioOutput();
-        // Test if we can play a silent audio to unlock autoplay
-        const audioData = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-        aiAudio.src = audioData;
-        await aiAudio.play();
-        console.log('[Audio] Test audio playback successful');
-        return true;
-      } catch (e) {
-        console.warn('[Audio] Test audio playback failed:', e);
-        return false;
-      }
-    }
-
-    async function ensureMic() {
-      if (micStream && micStream.active) return true;
-      
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({ 
-          audio: { 
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
-        });
-        console.log('[Mic] Permission granted and stream active');
-        return true;
-      } catch (err) {
-        console.error('Microphone access failed:', err);
-        
-        let errorMsg = '❌ Microphone access denied';
-        if (err.name === 'NotFoundError') {
-          errorMsg = '❌ No microphone found';
-        } else if (err.name === 'NotAllowedError') {
-          errorMsg = '❌ Microphone permission denied';
-        } else if (err.name === 'NotReadableError') {
-          errorMsg = '❌ Microphone is busy or unavailable';
-        }
-        
-        setStatus(errorMsg, 'error');
-        return false;
-      }
-    }
-
-    function releaseMic(reason = '') {
+    function releaseMic(reason='') {
       if (micStream) {
-        try {
-          micStream.getTracks().forEach(track => {
-            track.stop();
-            console.log('[Mic] Track stopped:', track.kind);
-          });
-        } catch (e) {
-          console.warn('[Mic] Error stopping tracks:', e);
-        }
+        try { micStream.getTracks().forEach(t => t.stop()); } catch {}
         micStream = null;
-        if (reason) console.log('[Mic] Released:', reason);
+        if (reason) console.log('[Mic] released:', reason);
       }
     }
 
-    // ---- VOICE FUNCTIONALITY ----
-    async function startVoice() {
-      // Disable button to prevent double-clicks
-      voiceBtn.disabled = true;
-      
-      try {
-        // 1. Ensure SDK is loaded
-        if (!(await loadSDK())) {
-          return;
-        }
+    // ---------- init client & wire events (like initializeVapi) ----------
+    function ensureClient() {
+      if (vapi || !sdkReady()) return;
+      if (!PUBLIC_KEY) { setStatus('❌ Missing Vapi public key', 'inactive'); return; }
+      vapi = new window.Vapi(PUBLIC_KEY);
 
-        // 2. Validate configuration
-        if (!PUBLIC_KEY || !ASSISTANT_ID) {
-          setStatus('❌ Missing Vapi configuration keys', 'error');
-          console.error('Missing keys. Check data-vapi-public-key and data-vapi-assistant-id on <body>.');
-          return;
-        }
-
-        // 3. Setup audio context (required for autoplay policies)
-        console.log('[Audio] Setting up audio context and output...');
-        await ensureAudioContext();
-        
-        // 4. Test and prepare audio output
-        ensureAudioOutput();
-        await testAudioOutput();
-
-        // 5. Request microphone permission
-        if (!(await ensureMic())) {
-          return;
-        }
-
-        // 6. Initialize Vapi client if needed
-        if (!vapi) {
-          // Normalize SDK reference (some CDNs use different global names)
-          const VapiClass = window.Vapi || window.VapiSDK;
-          if (!VapiClass) {
-            throw new Error('Vapi SDK not found after loading');
-          }
-          
-          console.log('[Vapi] Creating new Vapi instance...');
-          vapi = new VapiClass(PUBLIC_KEY);
-
-          // Setup comprehensive event handling
-          vapi.on('call-start', (params) => {
-            console.log('[Vapi] ✅ Call started - AI should speak soon:', params);
-            isListening = true;
-            setStatus('🔴 Connected - AI will speak first', 'listening');
-            voiceViz.classList.add('active');
-            
-            // Additional audio setup after call starts
-            setTimeout(() => {
-              ensureAudioOutput();
-              console.log('[Audio] Audio output re-ensured after call start');
-              
-              // If user still doesn't hear anything after 3 seconds, show help
-              setTimeout(() => {
-                if (isListening) {
-                  console.log('💡 If you don\'t hear the AI speaking:');
-                  console.log('  1. Check your volume/mute settings');
-                  console.log('  2. Type: testAudio() in console to test speakers');
-                  console.log('  3. Type: debugVapi() in console for detailed info');
-                  setStatus('🔴 Connected - No audio? Check volume/speakers', 'listening');
-                  
-                  // Show detailed help after 6 seconds
-                  setTimeout(() => {
-                    if (isListening) {
-                      setStatus('💡 Open browser console (F12) for audio help', 'thinking');
-                    }
-                  }, 3000);
-                }
-              }, 3000);
-            }, 100);
-          });
-
-          vapi.on('call-end', (params) => {
-            console.log('[Vapi] Call ended:', params);
-            isListening = false;
-            setStatus('✅ Ready to assist', 'inactive');
-            voiceViz.classList.remove('active');
-            voiceBtn.disabled = false;
-            releaseMic('call ended');
-          });
-
-          vapi.on('speech-start', () => {
-            console.log('[Vapi] 🎤 User speech started');
-            voiceViz.classList.add('active');
-            setStatus('🎤 Listening...', 'listening');
-          });
-
-          vapi.on('speech-end', () => {
-            console.log('[Vapi] 🎤 User speech ended');
-            voiceViz.classList.remove('active');
-            setStatus('🤖 AI responding...', 'thinking');
-          });
-
-          vapi.on('message', (message) => {
-            console.log('[Vapi] Message received:', message);
-            
-            if (message?.type === 'transcript' && message.transcriptType === 'final') {
-              addMsg('user', message.transcript);
-            }
-            
-            if (message?.type === 'assistant-response' && message.message) {
-              addMsg('ai', message.message);
-              setStatus('🔴 Connected - Speak now!', 'listening');
-            }
-
-            // Log any function calls or other message types
-            if (message?.type === 'function-call') {
-              console.log('[Vapi] Function call:', message);
-            }
-          });
-
-          vapi.on('error', (error) => {
-            console.error('[Vapi] ❌ Error:', error);
-            isListening = false;
-            voiceViz.classList.remove('active');
-            voiceBtn.disabled = false;
-            
-            let errorMsg = '❌ Voice error occurred';
-            if (error.message) {
-              errorMsg += `: ${error.message}`;
-            }
-            setStatus(errorMsg, 'error');
-            
-            setTimeout(() => releaseMic('error occurred'), 1000);
-          });
-
-          // Additional event listeners for debugging audio
-          if (typeof vapi.on === 'function') {
-            vapi.on('webrtc-state', (state) => console.log('[Vapi] WebRTC state:', state));
-            vapi.on('status', (status) => console.log('[Vapi] Status:', status));
-            vapi.on('volume-level', (volume) => console.log('[Vapi] AI volume level:', volume));
-          }
-        }
-
-        // 7. Start the voice call
-        setStatus('🎤 Starting voice connection...', 'thinking');
-        console.log('[Vapi] Starting call with assistant:', ASSISTANT_ID);
-        console.log('[Vapi] Expected: AI should speak first with greeting message');
-        
-        const result = await vapi.start(ASSISTANT_ID);
-        console.log('[Vapi] Start result:', result);
-
-        // Extra debugging for audio
-        setTimeout(() => {
-          console.log('[Debug] Call state after 2 seconds:');
-          console.log('  - isListening:', isListening);
-          console.log('  - Audio elements:', document.querySelectorAll('audio').length);
-          console.log('  - AudioContext state:', audioCtx?.state);
-          
-          if (isListening) {
-            console.log('[Debug] ✅ Call is active - if you don\'t hear AI, check:');
-            console.log('  1. Volume/mute settings');
-            console.log('  2. Assistant configuration (first message)');
-            console.log('  3. Browser autoplay policy');
-          }
-        }, 2000);
-
-      } catch (error) {
-        console.error('[Voice] Start failed:', error);
-        isListening = false;
-        voiceBtn.disabled = false;
+      vapi.on('speech-start', () => {
+        listening = true;
+        voiceViz.classList.add('active');
+        console.log('[Vapi] speech-start');
+      });
+      vapi.on('speech-end', () => {
+        listening = false;
         voiceViz.classList.remove('active');
-        
-        let errorMsg = '❌ Failed to start voice chat';
-        if (error.message) {
-          errorMsg += `: ${error.message}`;
+        console.log('[Vapi] speech-end');
+      });
+
+      vapi.on('message', (msg) => {
+        console.log('[Vapi] message', msg);
+        // Match your React handler:
+        if (msg?.type === 'transcript' && msg.transcriptType === 'final') {
+          addMsg('user', msg.transcript);
         }
-        setStatus(errorMsg, 'error');
-        
-        releaseMic('start failed');
+        // Many Vapi builds send assistant content as 'assistant-response'; yours also handled 'function-call'
+        if (msg?.type === 'assistant-response' && msg.message) {
+          addMsg('ai', msg.message);
+        } else if (msg?.type === 'function-call') {
+          const response = msg.functionCall?.parameters?.response;
+          if (response) addMsg('ai', response);
+        }
+      });
+
+      vapi.on('call-start', (info) => {
+        console.log('[Vapi] call-start', info);
+        connected = true;
+        setStatus('🔴 Connected — speak now!', 'listening');
+        voiceViz.classList.add('active');
+        // If you want to release the pre-permission stream now, uncomment:
+        // releaseMic('vapi has call');
+      });
+
+      vapi.on('call-end', (info) => {
+        console.warn('[Vapi] call-end', info);
+        connected = false;
+        listening = false;
+        setStatus('✅ Ready to assist', 'inactive');
+        voiceViz.classList.remove('active');
+        releaseMic('call-end');
+      });
+
+      vapi.on('error', (err) => {
+        console.error('[Vapi] error', err);
+        connected = false;
+        listening = false;
+        setStatus('❌ Voice error — see console', 'inactive');
+        setTimeout(() => releaseMic('error'), 600);
+      });
+    }
+
+    // ---------- start/stop (parity with toggleVoiceMode) ----------
+    async function startVoice() {
+      if (starting || connected) return;
+      starting = true;
+
+      await ensureAudioContext();
+      if (!(await requestMic())) { starting = false; return; }
+
+      if (!sdkReady()) {
+        setStatus('❌ SDK not found — ensure <script src="assets/vapi.js"> and docs/assets/vapi.js', 'inactive');
+        starting = false; return;
+      }
+      if (!ASSISTANT_ID) {
+        setStatus('❌ Missing assistant id', 'inactive');
+        starting = false; return;
+      }
+
+      try {
+        ensureClient();
+        setStatus('🎤 Starting voice…', 'thinking');
+        await vapi.start(ASSISTANT_ID);          // ← same as connectToAssistant() in your React code
+      } catch (e) {
+        console.error('start failed', e);
+        setStatus('❌ Start failed — see console', 'inactive');
+        releaseMic('start-failed');
       } finally {
-        // Re-enable button after a delay to prevent rapid clicking
-        setTimeout(() => {
-          if (!isListening) {
-            voiceBtn.disabled = false;
-          }
-        }, 2000);
+        starting = false;
       }
     }
 
     function stopVoice() {
-      try {
-        if (vapi && typeof vapi.stop === 'function') {
-          vapi.stop();
-          console.log('[Vapi] Stop called');
-        }
-      } catch (e) {
-        console.warn('[Vapi] Stop error:', e);
-      }
-      
-      isListening = false;
-      voiceBtn.disabled = false;
+      try { vapi?.stop?.(); } catch (e) { console.warn('stop error', e); }
+      connected = false;
+      listening = false;
       voiceViz.classList.remove('active');
       setStatus('Text mode active', 'inactive');
       releaseMic('manual stop');
     }
 
-    // ---- TEXT CHAT FUNCTIONALITY ----
-    function sendTextMessage() {
+    // ---------- UI (mirrors your React behavior) ----------
+    floatingIcon.addEventListener('click', async () => {
+      holo.classList.add('active');
+      setStatus('Choose Voice or Text', 'inactive');
+      // prompt mic the first time if user lands in voice mode
+      if (mode === 'voice' && micPermission === 'prompt') {
+        const ok = await requestMic();
+        if (!ok) mode = 'text';
+      }
+    });
+
+    closeBtn.addEventListener('click', () => { holo.classList.remove('active'); stopVoice(); });
+
+    voiceBtn.addEventListener('click', async () => {
+      mode = 'voice';
+      voiceBtn.classList.add('active');
+      textBtn.classList.remove('active');
+      chatContainer.classList.remove('active');
+
+      if (!connected) {
+        if (micPermission !== 'granted') {
+          const ok = await requestMic();
+          if (!ok) return;
+        }
+        await startVoice();
+      } else {
+        stopVoice();
+      }
+    });
+
+    textBtn.addEventListener('click', () => {
+      mode = 'text';
+      textBtn.classList.add('active');
+      voiceBtn.classList.remove('active');
+      chatContainer.classList.add('active');
+      stopVoice();
+      chatInput.focus();
+    });
+
+    sendBtn.addEventListener('click', () => {
       const msg = chatInput.value.trim();
       if (!msg) return;
-      
       addMsg('user', msg);
       chatInput.value = '';
-      
-      if (isListening && vapi && typeof vapi.send === 'function') {
+      if (connected && vapi) {
         try {
-          vapi.send({ 
-            type: 'add-message', 
-            message: { role: 'user', content: msg } 
-          });
+          // equivalent of your vapi.send({ type:'add-message', ... })
+          vapi.send?.({ type: 'add-message', message: { role: 'user', content: msg } });
           setStatus('AI thinking…', 'thinking');
-        } catch (e) {
-          console.warn('[Text] Failed to send via Vapi:', e);
-          // Fallback to mock response
-          setTimeout(() => {
-            addMsg('ai', "I'm here and listening. What would you like to do next?");
-            setStatus('Text mode active', 'inactive');
-          }, 700);
-        }
+        } catch (e) { console.warn('send failed', e); }
       } else {
-        // Mock AI response for text mode
+        // same “simulate assistant response” behavior you used
         setStatus('AI thinking…', 'thinking');
         setTimeout(() => {
           addMsg('ai', "I'm here and listening. What would you like to do next?");
           setStatus('Text mode active', 'inactive');
         }, 700);
       }
-    }
-
-    // ---- EVENT LISTENERS ----
-    floatingIcon.addEventListener('click', () => {
-      holo.classList.add('active');
-      setStatus('Choose Voice or Text mode', 'inactive');
     });
 
-    closeBtn.addEventListener('click', () => {
-      holo.classList.remove('active');
-      stopVoice();
-    });
-
-    voiceBtn.addEventListener('click', () => {
-      voiceBtn.classList.add('active');
-      textBtn.classList.remove('active');
-      chatContainer.classList.remove('active');
-      startVoice();
-    });
-
-    textBtn.addEventListener('click', () => {
-      textBtn.classList.add('active');
-      voiceBtn.classList.remove('active');
-      chatContainer.classList.add('active');
-      stopVoice();
-      
-      // Focus input after a brief delay to ensure it's visible
-      setTimeout(() => chatInput.focus(), 100);
-    });
-
-    sendBtn.addEventListener('click', sendTextMessage);
-
-    chatInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        sendTextMessage();
-      }
-    });
-
-    // ---- CLEANUP ----
-    window.addEventListener('beforeunload', () => {
-      stopVoice();
-      releaseMic('page unload');
-    });
-
-    // ---- INITIALIZATION ----
-    console.log('[Assistant] Initialized - GitHub Pages build with CDN SDK loading');
-    console.log('[Assistant] Note: Your local docs/assets/vapi.js is CommonJS format and cannot be used in browsers');
-    console.log('[Assistant] Will load browser-compatible SDK from CDN:', SDK_PATHS.slice(0, 2));
-    console.log('[Assistant] If you see "Cannot load Vapi SDK" - check your internet connection');
-    
-    // Immediate SDK loading attempt for better user feedback
-    loadSDK().then(success => {
-      if (success) {
-        console.log('[Assistant] ✅ SDK loaded successfully on page load');
-      } else {
-        console.warn('[Assistant] ❌ Failed to load SDK on page load - will retry when user clicks voice');
-      }
-    }).catch(e => {
-      console.warn('[SDK] Initial load failed:', e.message);
-    });
-    
-    // Backup: Try to preload SDK on DOM ready
-    document.addEventListener('DOMContentLoaded', () => {
-      if (!sdkLoaded) {
-        console.log('[Assistant] Retrying SDK load on DOM ready...');
-        loadSDK().catch(e => console.warn('[SDK] DOM ready load failed:', e));
-      }
-    });
-
+    console.log('[Assistant] Ready. SDK should be loaded via <script src="assets/vapi.js">');
   })();
 </script>
-</body>
-</html>
+
